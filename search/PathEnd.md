@@ -115,22 +115,50 @@ The family is public API, not an internal detail. Nine headers under `include/st
 `SearchClass.hh`, `Sta.hh`, `VisitPathEnds.hh`), and repository-wide the name appears in 11 `.hh`
 files, 21 `.cc` files, 4 SWIG interface files, and 29 `.tcl` files — 28 regression scripts under
 `search/test/` plus the command-layer script `tcl/Property.tcl`, which dispatches on the object type
-name `"PathEnd"` to reach the property accessor (*Source: `tcl/Property.tcl`:L74-L75*).
+name `"PathEnd"` to reach `path_end_property` (*Source: `tcl/Property.tcl`:L74-L75*). That command in
+turn forwards to the accessor `Properties::getProperty(PathEnd *end, std::string_view property)`
+(declared *Source: `include/sta/Property.hh`:L89*, defined *Source: `search/Property.cc`:L1200-L1228*),
+which answers seven property names — `startpoint`, `startpoint_clock`, `endpoint`, `endpoint_clock`,
+`endpoint_clock_pin`, `slack`, and `points` — and throws `PropertyUnknown` for anything else
+(*Source: `search/Property.cc`:L1227*).
 
 It also crosses the SWIG boundary into the Tcl command layer, and the shape of that crossing is worth
-seeing. The interface declares a minimal `class PathEnd` whose only two members are a private
-constructor and a private destructor (*Source: `search/Search.i`:L68-L73*), so the Tcl layer can name
-the type without being able to construct or destroy one. Four functions in those interface files take
-or return it: the producer `find_path_ends` (*Source: `search/Search.i`:L353-L356*), the reporter
-`report_path_end` (*Source: `search/Search.i`:L390-L394*), the property accessor `path_end_property`
+seeing, because it has two halves rather than one. The interface declares a minimal `class PathEnd`
+whose only two members are a private constructor and a private destructor
+(*Source: `search/Search.i`:L68-L73*), so the Tcl layer can name the type without being able to
+construct or destroy one.
+
+**The free-function half.** Five functions across those interface files take or return the type: the
+producer `find_path_ends` (*Source: `search/Search.i`:L353-L356*), the single-end reporter
+`report_path_end` (*Source: `search/Search.i`:L390-L394*), the whole-sequence reporter
+`report_path_ends`, which reports a `PathEndSeq *` and then deletes the sequence
+(*Source: `search/Search.i`:L462-L467*), the property accessor `path_end_property`
 (*Source: `search/Property.i`:L124-L126*), and the filter `filter_path_ends`, which both takes and
-returns a `PathEndSeq` (*Source: `sdc/Sdc.i`:L1566-L1572*). The typemaps that marshal those pointers
-live in `tcl/StaTclTypes.i`, which includes the header directly (*Source: `tcl/StaTclTypes.i`:L43*)
-and converts `PathEnd *` and `PathEndSeq *` to and from Tcl values
-(*Source: `tcl/StaTclTypes.i`:L1114-L1135*). One of them states the ownership rule in its own words —
-"Delete the PathEndSeq, not the ends." (*Source: `tcl/StaTclTypes.i`:L1132*) — the same distinction
-section 9, invariant 1 draws between the transient sequence and the ends inside it, which belong to
-path grouping.
+returns a `PathEndSeq` (*Source: `sdc/Sdc.i`:L1566-L1572*).
+
+**The object-method half.** Under its own "Object Methods" banner (*Source:
+`search/Search.i`:L1120-L1123*) the interface grafts 23 methods onto the Tcl object with a
+`%extend PathEnd` block (*Source: `search/Search.i`:L1125-L1193*): the seven leaf predicates
+(*Source: `search/Search.i`:L1126-L1132*), four path and pin accessors
+(*Source: `search/Search.i`:L1133-L1137*), seven `float` accessors that convert a `Delay` through
+`delayAsFloat` — `slack`, `margin`, `data_required_time`, `data_arrival_time`, `target_clk_delay`,
+`source_clk_latency`, and `clk_skew` (*Source: `search/Search.i`:L1139-L1186*) — and five role and
+clock accessors (*Source: `search/Search.i`:L1188-L1192*). This block is what makes
+`[$pe is_latch_check]` and `[$pe is_check]` legal Tcl, which is the mechanism behind the golden-file
+evidence for section 9, invariant 3.
+
+**The marshalling.** The typemaps live in `tcl/StaTclTypes.i`, which includes the header directly
+(*Source: `tcl/StaTclTypes.i`:L43*). Three of them concern this family: `%typemap(out) PathEnd*`
+(*Source: `tcl/StaTclTypes.i`:L1114-L1117*), the pointer pair `%typemap(in) PathEndSeq*` and
+`%typemap(out) PathEndSeq*` (*Source: `tcl/StaTclTypes.i`:L1119-L1135*), and
+`%typemap(out) PathEndSeq` for a sequence returned by value
+(*Source: `tcl/StaTclTypes.i`:L1137-L1139*). The last one is the one that actually marshals the two
+functions named above whose return type is a bare `PathEndSeq` — `find_path_ends`
+(*Source: `search/Search.i`:L353*) and `filter_path_ends` (*Source: `sdc/Sdc.i`:L1566*) — so the
+pointer typemap and the value typemap are both live rather than one superseding the other. The
+pointer form states the ownership rule in its own words — "Delete the PathEndSeq, not the ends."
+(*Source: `tcl/StaTclTypes.i`:L1132*) — the same distinction section 9, invariant 1 draws between the
+transient sequence and the ends inside it, which belong to path grouping.
 
 That public status is also why the project's own guidance puts the explanatory comments in the header:
 "Place comments describing public functions and classes in header files rather than code files because
@@ -237,7 +265,7 @@ declared in the same header as the family's forward declaration, `class PathEnd;
 including `include/sta/PathEnd.hh` at all — which is a large part of why the type appears in so many
 files.
 
-### 2.1 A consumer that is not reporting
+### 2.1 The consumers that are not reporting
 
 Reporting is not the only consumer, and this matters for section 9's claim that the `Type`
 enumeration's order is load-bearing. `MinPeriodEndVisitor::visit`
@@ -261,17 +289,58 @@ built, and it **never receives a `PathEndSeq`**; neither `Sta::findPathEnds` nor
 its path at all. The reporting route instead uses the five-argument overload
 (*Source: `include/sta/VisitPathEnds.hh`:L44-L48*) from `search/PathGroup.cc`:L1004-L1005.
 
-The other non-reporting consumer is the opposite case, and the two are worth keeping straight:
-`filterPathEnds` *does* take the returned sequence — its parameter is `PathEndSeq *ends`
-(*Source: `sdc/FilterObjects.cc`:L551-L554*) — and it orders the filtered result with `PathEndLess`
-(*Source: `sdc/FilterObjects.cc`:L556*).
+**`MinPeriodEndVisitor` is one of five non-reporting visitors, not the only one, and the full census
+matters because it sets the family's blast radius.** A repository-wide search for classes deriving
+from `PathEndVisitor`, excluding tests, returns seven production implementations. Two of them exist to
+serve reporting; the other five serve the engine, model extraction, or a query instead:
+
+| Visitor | Declared | What it does with a `PathEnd` | Driven from |
+|---|---|---|---|
+| `MakePathEnds1` | `search/PathGroup.cc`:L645 | Retains a clone of the worst end in each path group, for reporting | `search/PathGroup.cc`:L1004 |
+| `MakePathEndsAll` | `search/PathGroup.cc`:L719 | Retains clones for reporting, one per CRPR tag, so `PathEnum` can peel the rest | `search/PathGroup.cc`:L1004 |
+| `FindEndRequiredVisitor` | `search/Search.cc`:L3297 | Reads `requiredTime()` and feeds `RequiredCmp::requiredSet`, seeding required-time back-propagation (*Source: `search/Search.cc`:L3341-L3350*) | `search/Search.cc`:L3360, L3372, L3483 |
+| `FindEndSlackVisitor` | `search/Search.cc`:L3924 | Reads `slack()` and keeps the smallest per path analysis point, which is how endpoint slacks reach the worst-slack computation (*Source: `search/Search.cc`:L3952-L3961*) | `search/Search.cc`:L3976 |
+| `EndpointPathEndVisitor` | `search/Sta.cc`:L3249 | Reads `minMax()` and `slack()`, filtered by path-group name via `PathGroups::pathGroupNames` (*Source: `search/Sta.cc`:L3283-L3295*) | `search/Sta.cc`:L3308 |
+| `MinPeriodEndVisitor` | `search/Sta.cc`:L3439 | Branches on `type()` for minimum-period analysis (*Source: `search/Sta.cc`:L3474-L3495*) | `search/Sta.cc`:L3518 |
+| `MakeEndTimingArcs` | `search/MakeTimingModel.cc`:L241 | Reads `targetClkEdge()`, `minMax()`, `targetClkDelay()`, `margin()`, and `typeName()` to build extracted timing-model margins (*Source: `search/MakeTimingModel.cc`:L275-L295*) | `search/MakeTimingModel.cc`:L353 |
+
+One qualification belongs on that split. `MakeEndTimingArcs` is a model-extraction visitor, but it is
+not unconditionally silent: when the `make_timing_model` debug level reaches 3 it calls
+`sta_->reportPathEnd(path_end)` (*Source: `search/MakeTimingModel.cc`:L296-L297*), which is the only
+place any of the five reaches the reporting facade. Checked method by method over their full class
+bodies, the other four — `FindEndRequiredVisitor`, `FindEndSlackVisitor`, `EndpointPathEndVisitor`, and
+`MinPeriodEndVisitor` — contain no call to a `report`-prefixed member at all.
+
+Two consequences are worth stating plainly. First, `requiredTime()` and `slack()` are not reporting
+accessors that happen to be reachable from the engine — they are engine inputs, so their semantics are
+load-bearing for required-time propagation and for worst-slack reporting, not only for the printed
+report. Second, `typeName()` is read outside reporting as well, which section 4.1 records.
+
+**Not every consumer arrives through a visit callback; some take a value the pipeline already
+produced.** Two such consumers sit outside reporting. `filterPathEnds` takes the returned sequence —
+its parameter is `PathEndSeq *ends` (*Source: `sdc/FilterObjects.cc`:L551-L554*) — and it orders the
+filtered result with `PathEndLess` (*Source: `sdc/FilterObjects.cc`:L556*).
+`Properties::getProperty(PathEnd *, std::string_view)` takes a single retained end rather than a
+sequence (*Source: `search/Property.cc`:L1200-L1228*); it is the accessor behind `path_end_property`
+described in section 1. By-value consumption is not peculiar to those two, however: the reporting
+facade works the same way, since `reportPathEnd(PathEnd *end)` and `reportPathEnds(PathEndSeq *ends)`
+(*Source: `include/sta/Sta.hh`:L997-L998*) forward to the `ReportPath` entry point
+`ReportPath::reportPathEnds(const PathEndSeq *ends)` (*Source: `search/ReportPath.cc`:L320*). The
+distinction that matters for this section is therefore reporting versus not, not by-value versus
+callback.
 
 ### 2.2 Diagram 1 — the pipeline
 
-Two entry points are drawn, because there are two. The reporting facade `Sta::findPathEnds` runs the
-full produce → retain → order → return chain; `Sta::findClkMinPeriod` drives the same factory
-directly with its own visitor and stops at the visit callback. Only consumers that take the returned
-sequence hang off the `PathEndSeq` node.
+Two entry points are drawn: the reporting facade, and one representative consumer that drives the
+factory directly. The reporting facade `Sta::findPathEnds` runs the full produce → retain → order →
+return chain; `Sta::findClkMinPeriod` drives the same factory directly with its own visitor and stops
+at the visit callback. That second shape is representative rather than unique — two further sites
+construct their own `VisitPathEnds` in exactly the same way (*Source: `search/Sta.cc`:L3306,
+`search/MakeTimingModel.cc`:L351*), and `Search` drives the `VisitPathEnds` it holds as a member
+(*Source: `include/sta/Search.hh`:L674*) at four more call sites (*Source: `search/Search.cc`:L3360,
+`search/Search.cc`:L3372, `search/Search.cc`:L3483, `search/Search.cc`:L3976*). Section 2.1 tabulates
+every one of them; the diagram draws one so that the shape stays readable. Only consumers that take
+the returned sequence hang off the `PathEndSeq` node.
 
 ```mermaid
 flowchart TD
@@ -516,9 +585,12 @@ The `typeName()` strings above are string literals returned directly, one per ty
 above, which is not line order. Four of the seven are pinned by assertions in a committed unit test
 (*Source: `search/test/cpp/TestSearchStaInit.cc`:L3217,
 `search/test/cpp/TestSearchStaInit.cc`:L3233, `search/test/cpp/TestSearchStaInit.cc`:L3254,
-`search/test/cpp/TestSearchStaInit.cc`:L3270*). Three consumers read the string: two debug traces in
-path grouping (*Source: `search/PathGroup.cc`:L801, `search/PathGroup.cc`:L816*) and the JSON report
-(*Source: `search/ReportPath.cc`:L1064*).
+`search/test/cpp/TestSearchStaInit.cc`:L3270*). Four consumers read the string: two debug traces in
+path grouping (*Source: `search/PathGroup.cc`:L801, `search/PathGroup.cc`:L816*), the JSON report
+(*Source: `search/ReportPath.cc`:L1064*), and a debug trace in timing-model extraction — the
+`debugPrint` inside `MakeEndTimingArcs::visit` (*Source: `search/MakeTimingModel.cc`:L292-L295*, the
+`typeName()` argument at L294), which is one of the non-reporting consumers tabulated in section 2.1.
+So the string is not a reporting-only affordance.
 
 ### 4.2 Which type gets built — the factory decides, not `PathEnd`
 
@@ -675,8 +747,12 @@ Two precision points about these sets, both of which are easy to get wrong:
   PathEndOutputDelay, PathEndGatedClock, PathEndDataCheck`
   (*Source: `search/ReportPath.hh`:L92-L98*), whereas the enumeration order is `unconstrained, check,
   data_check, latch_check, output_delay, gated_clk, path_delay`
-  (*Source: `include/sta/PathEnd.hh`:L62-L69*). The two sequences agree only on their first two
-  elements.
+  (*Source: `include/sta/PathEnd.hh`:L62-L69*). Compared position by position, the two sequences agree
+  at four of the seven — the first two, and the fifth and sixth (`output_delay` and `gated_clk`) — and
+  differ at the third, fourth, and seventh, where the overload order runs latch check, path delay, data
+  check against the enumeration's data check, latch check, path delay. The agreement at positions five
+  and six is coincidence rather than a shared convention, so neither order may be used to predict the
+  other.
 
 The consequence of this four-fold correspondence is worth stating for anyone considering an eighth
 concrete type: it would need an enumerator, a leaf predicate, a `reportShort` overload, a `reportFull`
@@ -992,8 +1068,9 @@ requested per group from the multi-path branch of `PathGroups::makeGroupPathEnds
 `exceptPathCmp` is the ordering used when two ends must be distinguished by *what they are* rather
 than by how good they are. It is declared once in the base
 (*Source: `include/sta/PathEnd.hh`:L99-L100*) and overridden at every level that adds a distinguishing
-field. Each override calls its parent first and appends exactly one discriminator, so the chain
-refines rather than replaces.
+field. Each override calls its parent first and then appends a discriminator of its own, so the chain
+refines rather than replaces. Eight of the nine levels append exactly one discriminator; level 9 is
+the exception and appends two, as the table below and the note after it record.
 
 | # | Implementing class | Definition | Parent call | Discriminator appended |
 |---|---|---|---|---|
@@ -1018,10 +1095,26 @@ Level 1 is where the `Type` ordering becomes semantics rather than presentation:
 *Source: `search/PathEnd.cc`:L286-L288*, returning `-1` when `type1 < type2`
 (*Source: `search/PathEnd.cc`:L290-L291*). Section 9, invariant 2 records what follows from that.
 
-The chain has exactly two consumers: `PathEnd::cmpNoCrpr` calls it at
+The chain has exactly two production consumers: `PathEnd::cmpNoCrpr` calls it at
 `search/PathEnd.cc`:L2052, and `PathEndNoCrprLess::operator()` calls it at
 `search/PathEnd.cc`:L2108. Both then fall through to `Path::cmpNoCrpr`
-(*Source: `include/sta/Path.hh`:L150*) when the chain reports equality.
+(*Source: `include/sta/Path.hh`:L150*) when the chain reports equality. Beyond those two and the eight
+intra-chain parent calls in the table above, the only remaining call sites in the repository are in the
+committed tests, and they are the subject of the next paragraph.
+
+**Guarding test.** Level 1's identity behavior is pinned by an asserting unit test.
+`TEST_F(StaInitTest, PathEndUnconstrainedExceptPathCmp)` builds two `PathEndUnconstrained` objects over
+separate `Path` instances, calls `int cmp = pe1.exceptPathCmp(&pe2, sta_);`, and asserts
+`EXPECT_EQ(cmp, 0);` (*Source: `search/test/cpp/TestSearchStaInitB.cc`:L643-L650*, the call at L648 and
+the assertion at L649) — two ends of the same type with no further discriminator compare equal.
+`PathEndUnconstrained` is the natural subject for that assertion because it is one of the four types
+that can be constructed from a placeholder path at all, which section 9, invariant 7 records. The
+chain's behavior on real endpoints is covered separately but only as a smoke call:
+`TEST_F(StaDesignTest, PathEndExceptPathCmp)` obtains ends through the facade, guards on
+`if (ends.size() >= 2)`, and calls `ends[0]->exceptPathCmp(ends[1], sta_);` inside an
+`ASSERT_NO_THROW` without inspecting the result (*Source:
+`search/test/cpp/TestSearchStaDesign.cc`:L3277-L3290*, the call at L3286), so it pins that the chain
+does not throw rather than what it returns.
 
 Level 9 is the only one that appends two discriminators rather than one: it compares the path delay
 first and, only when those are equal, the check arc
@@ -1796,21 +1889,34 @@ matter of reading carefully.
 | Location | Subject |
 |---|---|
 | `include/sta/Sta.hh`:L942-L948 | The facade entry point, its ownership comment, and the `unconstrained` parameter |
+| `include/sta/Sta.hh`:L997-L998 | `reportPathEnd` and `reportPathEnds` — the facade's by-value reporting entry points |
 | `include/sta/Search.hh`:L93, L96-L97 | `unconstrainedPaths()`, then the producer and its ownership comment |
 | `search/Sta.cc`:L2718, L2741 | `Sta::findPathEnds` forwarding to the search engine |
 | `search/Search.cc`:L473-L519 | `Search::findPathEnds` (the `unconstrained` parameter at L477, the forward at L495, groups per mode at L504, L513, the flag passed on at L507, L514, return at L518, check-flag gating at L498-L499) |
 | `search/Search.cc`:L528 | `Search::findFilteredArrivals` — where `unconstrained_paths_` is assigned |
+| `include/sta/Search.hh`:L674 | `VisitPathEnds *visit_path_ends_;` — the factory `Search` holds as a member |
+| `search/Search.cc`:L3297, L3341-L3350 | `FindEndRequiredVisitor` and its `visit`, which reads `requiredTime()` at L3347 and seeds `RequiredCmp` at L3348 |
+| `search/Search.cc`:L3360, L3372, L3483 | The three sites that drive `FindEndRequiredVisitor` |
+| `search/Search.cc`:L3924, L3952-L3961, L3976 | `FindEndSlackVisitor`, its `visit` reading `slack()` at L3957, and the one site that drives it |
+| `search/Sta.cc`:L3249, L3283-L3295 | `EndpointPathEndVisitor` and its `visit` — `minMax()` L3285, `PathGroups::pathGroupNames` L3286, `slack()` L3289 |
+| `search/Sta.cc`:L3297-L3312 | `Sta::endpointSlack` — its own `VisitPathEnds` at L3306 and direct visit at L3308 |
+| `search/Sta.cc`:L3439 | `MinPeriodEndVisitor` declared |
 | `search/Sta.cc`:L3474-L3495 | `MinPeriodEndVisitor::visit` — `Type` dispatch outside reporting, at L3482 |
 | `search/Sta.cc`:L3508-L3521 | `Sta::findClkMinPeriod` — its own `VisitPathEnds` at L3514 and direct visit at L3518 |
+| `search/MakeTimingModel.cc`:L241, L275-L295 | `MakeEndTimingArcs` and its `visit` — `targetClkEdge()` L280, `minMax()` L284, `targetClkDelay()` L286, `margin()` L287, and the `typeName()` debug trace at L294 |
+| `search/MakeTimingModel.cc`:L296-L297 | The debug-level-3 `reportPathEnd` call — the only route from the five non-reporting visitors into the reporting facade |
+| `search/MakeTimingModel.cc`:L351-L353 | Its own `VisitPathEnds` and the five-argument visit that drives it |
 | `search/PathGroup.cc`:L164-L165 | Clone-then-`setPath`, the only mutation of a retained end |
 | `search/PathGroup.cc`:L177-L186, L188-L207 | `PathGroup::insert` (group assigned at L182) and `::prune` (sort L191, delete L204) |
 | `search/PathGroup.cc`:L237, L631, L660, L665, L738, L739, L747 | The comparator construction and member sites |
 | `search/PathGroup.cc`:L611, L783-L784, L789, L790, L796-L798 | `MakePathEndsAll::vertexEnd`, the `PathEndLess` sort, the `PathEndNoCrprLess`-ordered set, and the "PathEnum will peel the others" comment |
 | `search/PathGroup.cc`:L617, L829, L838, L842, L852 | `makePathEnds`, `makeGroupPathEnds`, the two visitors, `enumPathEnds` |
+| `search/PathGroup.cc`:L645, L719 | Where those two reporting visitors are declared |
 | `search/PathGroup.cc`:L691, L696, L780, L804-L805, L808 | The remaining `PathEnd::copy()` retention sites and the reason comment |
 | `search/PathGroup.cc`:L883-L910 | `enumPathEnds` — the `PathEnum` hand-off |
 | `search/PathGroup.cc`:L962, L1004-L1005 | `MakeEndpointPathEnds` driving `VisitPathEnds` |
-| `search/PathGroup.cc`:L801, L816 · `search/ReportPath.cc`:L1064 | The three `typeName()` consumers |
+| `search/PathGroup.cc`:L801, L816 · `search/ReportPath.cc`:L1064 · `search/MakeTimingModel.cc`:L292-L295 | The four `typeName()` consumers, the last being the timing-model debug trace whose `typeName()` argument is at L294 |
+| `search/ReportPath.cc`:L320 | `ReportPath::reportPathEnds` — the sequence-taking reporting entry point the facade forwards to |
 | `search/ReportPath.hh`:L92-L98, L100-L106 | The seven `reportShort` and seven `reportFull` single-argument overloads |
 | `search/ReportPath.hh`:L138, L146, L152, L185-L197 | The ten further `reportShort` overloads that are not part of that set |
 | `search/Latches.hh`:L52, L64, L90, L101 | The borrowing service interface, public and protected |
@@ -1827,10 +1933,13 @@ matter of reading carefully.
 | `include/sta/MinMax.hh`:L70 | `opposite()` |
 | `include/sta/Mode.hh`:L66-L67, L93 | `Mode`'s path-groups accessors and member |
 | `include/sta/PathGroup.hh`:L49-L50, L73, L74, L76, L77-L78, L97, L107, L116, L136-L137 | The path-group contract, including the "owned by the PathGroups" comment. The declarations live under `include/sta`; only the implementation `search/PathGroup.cc` is in `search/`. |
-| `search/Search.i`:L68-L73, L353-L356, L390-L394 | The SWIG-visible `class PathEnd`, `find_path_ends`, and `report_path_end` |
+| `search/Search.i`:L68-L73, L353-L356, L390-L394, L462-L467 | The SWIG-visible `class PathEnd` and the free functions `find_path_ends`, `report_path_end`, and `report_path_ends` |
+| `search/Search.i`:L1120-L1123, L1125-L1193 | The "Object Methods" banner and the `%extend PathEnd` block — 23 Tcl object methods, partitioned as predicates L1126-L1132, path and pin accessors L1133-L1137, `float` accessors L1139-L1186, role and clock accessors L1188-L1192 |
 | `search/Property.i`:L124-L126 | `path_end_property` |
-| `sdc/Sdc.i`:L1566-L1572 | `filter_path_ends`, which both takes and returns a `PathEndSeq` |
-| `tcl/StaTclTypes.i`:L43, L1114-L1135 | The header include and the `PathEnd *` / `PathEndSeq *` typemaps, with the ownership comment at L1132 |
+| `include/sta/Property.hh`:L89 | `Properties::getProperty(PathEnd *, std::string_view)` declared |
+| `search/Property.cc`:L1200-L1228 | That accessor defined — the seven answered property names, and the `PropertyUnknown` throw at L1227 |
+| `sdc/Sdc.i`:L1566-L1572 | `filter_path_ends`, whose return type at L1566 is a bare `PathEndSeq` and which both takes and returns one |
+| `tcl/StaTclTypes.i`:L43, L1114-L1117, L1119-L1135, L1137-L1139 | The header include, the `PathEnd *` typemap, the `PathEndSeq *` in/out pair with the ownership comment at L1132, and the by-value `PathEndSeq` out typemap |
 | `tcl/Property.tcl`:L74-L75 | The Tcl command layer dispatching on the object type name `"PathEnd"` |
 
 ### 11.5 Behavioral evidence — committed tests
@@ -1841,6 +1950,8 @@ matter of reading carefully.
 | `search/test/cpp/TestSearchStaInit.cc`:L3212-L3287 | Per-type construction, `typeName()`, predicates, and the three limitation comments at L3243, L3278-L3279, L3286 |
 | `search/test/cpp/TestSearchStaInit.cc`:L3861 | The comment recording that `deletePath` is declared but not defined |
 | `search/test/cpp/TestSearchStaDesign.cc`:L1484-L1498, L3353-L3366 | The two comparator tests on real path ends |
+| `search/test/cpp/TestSearchStaInitB.cc`:L643-L650 | `TEST_F(StaInitTest, PathEndUnconstrainedExceptPathCmp)` — the asserting guard on chain level 1, with the call at L648 and `EXPECT_EQ(cmp, 0)` at L649 |
+| `search/test/cpp/TestSearchStaDesign.cc`:L3277-L3290 | `TEST_F(StaDesignTest, PathEndExceptPathCmp)` — the chain exercised on real endpoints inside `ASSERT_NO_THROW`, result discarded at L3286 |
 | `search/test/search_latch_timing.tcl`:L14-L15, L59 · `search/test/search_latch_timing.ok`:L453-L460, L461-L465 | The golden that pins `is_latch_check` / `is_check` for latch and output-delay endpoints (section 9, invariant 3) |
 | `search/test/CMakeLists.txt`:L7, L12, L13, L21, L23, L35, L36, L54, L58 | Registration of the nine golden regression scripts |
 | `CMakeLists.txt`:L705-L715 | `sta_module_tests`, which turns those entries into CTest tests |
