@@ -18,22 +18,51 @@ without re-reading the prose.
 reader who needs only that can stop at section 4. Sections 5 through 8 are the internals. Section 9
 records the invariants and the rough edges. Sections 10 and 11 are evidence.
 
-**Two disclosures, made up front.**
+**Five disclosures, made up front.**
 
-- **The diagrams use Mermaid, which has no precedent in this repository.** A repository-wide search
-  for `mermaid` (excluding `.git`) returns zero occurrences. It is used here because it needs no
-  tooling: the diagrams are plain text inside fenced blocks, rendered by the repository host, so they
-  add no dependency, no generator, and no build step. That matters, because the project states:
-  "Contributions that add dependencies on external libraries like boost, abseil and Intel TBB will
-  not be accepted." *Source: `README.md`:L288-L289.* No documentation generator exists in this
-  repository to target either — `Doxyfile`, `mkdocs.yml`, `conf.py`, `docusaurus.config.js`,
-  `.readthedocs.yml`, `typedoc.json`, `book.toml`, and `package.json` are all absent.
-- **Per-method documentation is deliberately not attempted.** The base class alone declares dozens of
-  virtual methods across `include/sta/PathEnd.hh`:L71-L201, and the subclasses add many more.
-  Documenting each one would duplicate the header and bloat this file. Instead, sections 5, 6, and 8
-  trace the *complete computation chains* — required time, arrival, slack, margin, borrowing — and
-  the header remains the per-signature reference. This is a bounded scope decision, stated plainly
-  rather than presented as full coverage.
+- **This is documentation only.** It describes the `PathEnd` family as it stands and prescribes
+  nothing. Where a statement could be read as advice, it is not: every item in section 9 is an
+  observation about existing code. The only artifact this work adds to the repository is this file.
+- **No code, behavior, or signature changed.** Every file cited below was read, never edited — no
+  source, header, test, golden, build, or CI file was touched, and that includes the two subject files
+  `include/sta/PathEnd.hh` and `search/PathEnd.cc`. Nothing here is compiled, linked, installed, or
+  executed either; the build evidence for that is under "Notes on form" below.
+- **No external source is cited anywhere in this document.** Every claim resolves to a location in
+  this repository, and every convention resolves to a repository authority — `doc/CodingGuidelines.txt`
+  for comment style, `.clang-format` as a value source only, `.cursor/rules/*.mdc`, `dcalc/Arnoldi.txt`
+  for placement and form, and `README.md` for policy. No external publication, article, or
+  best-practice claim is quoted, paraphrased, or attributed.
+- **No dependency, generator, linter, or build step was added — and the diagrams use Mermaid, which
+  has no precedent in this repository.** A repository-wide search for `mermaid` (excluding `.git`)
+  returns zero occurrences. It is used here because it needs no tooling: the diagrams are plain text
+  inside fenced blocks, rendered by the repository host, so they add no dependency, no generator, and
+  no build step. That matters, because the project states: "Contributions that add dependencies on
+  external libraries like boost, abseil and Intel TBB will not be accepted." *Source:
+  `README.md`:L288-L289.* No documentation generator exists in this repository to target either —
+  `Doxyfile`, `mkdocs.yml`, `conf.py`, `docusaurus.config.js`, `.readthedocs.yml`, `typedoc.json`,
+  `book.toml`, and `package.json` were each searched for and are all absent, so none of those names
+  is a citation.
+- **Defects found while reading are recorded, not repaired.** Four of them are: a declaration with no
+  definition (section 9, invariant 4), a three-way disagreement about whether an output delay has a
+  target clock path (invariant 5), casts made without a null test (invariant 6), and a field that is
+  written and never read (observation 14). Each is written down with its evidence and left exactly as
+  it is, because the files that carry them are read-only to this document.
+
+**Bounded scope, stated plainly: per-method documentation is deliberately not attempted.** The base
+class alone declares **73** distinct member-function names — 69 in its public run at
+`include/sta/PathEnd.hh`:L71-L201 and 5 in its protected run at `include/sta/PathEnd.hh`:L205-L221,
+of which `ignoreClkLatency` appears in both (`include/sta/PathEnd.hh`:L151, L218), so the union is 73
+— and the nine subclasses add **12, 22, 5, 14, 20, 15, 9, 14, and 21** in header declaration order,
+which is the row order of the table in section 3.3: `PathEndUnconstrained`, `PathEndClkConstrained`,
+`PathEndClkConstrainedMcp`, `PathEndCheck`, `PathEndLatchCheck`, `PathEndOutputDelay`,
+`PathEndGatedClock`, `PathEndDataCheck`, `PathEndPathDelay`. Each of the three comparators adds
+exactly one, `operator()`. Those counts were derived mechanically — the distinct member-function names
+declared inside each class's line extent (section 3.3), with constructors and destructors excluded and
+overloads collapsed to one name. The per-class counts sum to 208, a figure in which a name recurs once
+per class that overrides it. Walking that many entries one at a time would duplicate the header and
+bloat this file. Instead, sections 5, 6, and 8 trace the *complete computation chains* — required time,
+arrival, slack, margin, borrowing — and the header remains the per-signature reference. This is a
+bounded scope decision, stated plainly rather than presented as full coverage.
 
 **Notes on form.** This file carries no license banner and is registered nowhere, matching the only
 precedent in this repository for a module-local maintainer design note: `dcalc/Arnoldi.txt`, which
@@ -84,12 +113,29 @@ section 9, invariant 1.
 The family is public API, not an internal detail. Nine headers under `include/sta` mention `PathEnd`
 (`FilterObjects.hh`, `Mode.hh`, `PathEnd.hh`, `PathGroup.hh`, `Property.hh`, `Search.hh`,
 `SearchClass.hh`, `Sta.hh`, `VisitPathEnds.hh`), and repository-wide the name appears in 11 `.hh`
-files, 21 `.cc` files, 4 SWIG interface files (`sdc/Sdc.i`, `search/Property.i`, `search/Search.i`,
-`tcl/StaTclTypes.i`), and 29 Tcl regression scripts. That public status is also why the project's own
-guidance puts the explanatory comments in the header: "Place comments describing public functions and
-classes in header files rather than code files because a consumer is more likely to have access to
-the header and that is the first place they will look." *Source:
-`doc/CodingGuidelines.txt`:L33-L35.*
+files, 21 `.cc` files, 4 SWIG interface files, and 29 `.tcl` files — 28 regression scripts under
+`search/test/` plus the command-layer script `tcl/Property.tcl`, which dispatches on the object type
+name `"PathEnd"` to reach the property accessor (*Source: `tcl/Property.tcl`:L74-L75*).
+
+It also crosses the SWIG boundary into the Tcl command layer, and the shape of that crossing is worth
+seeing. The interface declares a minimal `class PathEnd` whose only two members are a private
+constructor and a private destructor (*Source: `search/Search.i`:L68-L73*), so the Tcl layer can name
+the type without being able to construct or destroy one. Four functions in those interface files take
+or return it: the producer `find_path_ends` (*Source: `search/Search.i`:L353-L356*), the reporter
+`report_path_end` (*Source: `search/Search.i`:L390-L394*), the property accessor `path_end_property`
+(*Source: `search/Property.i`:L124-L126*), and the filter `filter_path_ends`, which both takes and
+returns a `PathEndSeq` (*Source: `sdc/Sdc.i`:L1566-L1572*). The typemaps that marshal those pointers
+live in `tcl/StaTclTypes.i`, which includes the header directly (*Source: `tcl/StaTclTypes.i`:L43*)
+and converts `PathEnd *` and `PathEndSeq *` to and from Tcl values
+(*Source: `tcl/StaTclTypes.i`:L1114-L1135*). One of them states the ownership rule in its own words —
+"Delete the PathEndSeq, not the ends." (*Source: `tcl/StaTclTypes.i`:L1132*) — the same distinction
+section 9, invariant 1 draws between the transient sequence and the ends inside it, which belong to
+path grouping.
+
+That public status is also why the project's own guidance puts the explanatory comments in the header:
+"Place comments describing public functions and classes in header files rather than code files because
+a consumer is more likely to have access to the header and that is the first place they will look."
+*Source: `doc/CodingGuidelines.txt`:L33-L35.*
 
 ---
 
@@ -102,9 +148,11 @@ call by call; each hop is cited.
 
 ```cpp
   PathEndSeq findPathEnds(ExceptionFrom *from,
+                          ExceptionThruSeq *thrus,
+                          ExceptionTo *to,
 ```
 
-*Source: `include/sta/Sta.hh`:L945.* Its definition forwards straight to the search engine
+*Source: `include/sta/Sta.hh`:L945-L947.* Its definition forwards straight to the search engine
 (*Source: `search/Sta.cc`:L2718, forwarding at `search/Sta.cc`:L2741*).
 
 **Production.** `Search::findPathEnds` is declared at `include/sta/Search.hh`:L97 and defined at
@@ -138,6 +186,23 @@ assigns each retained end to its reporting bucket via `path_end->setPathGroup(th
 (*Source: `search/PathGroup.cc`:L182*), and drops the surplus in `PathGroup::prune`
 (*Source: `search/PathGroup.cc`:L188-L207*, with the deletion at `search/PathGroup.cc`:L204).
 
+**Where that retention contract is declared.** The implementation just cited is in `search/`, but the
+declarations are under `include/sta` — a split worth stating explicitly, because there is no
+`PathGroup` header in `search/`. `class PathGroup` is introduced by its own comment, "A collection of
+PathEnds grouped and sorted for reporting." (*Source: `include/sta/PathGroup.hh`:L49-L50*), and it
+declares `pathEnds()`, which hands back the retained `PathEndSeq` by value
+(*Source: `include/sta/PathGroup.hh`:L73*), `insert`
+(*Source: `include/sta/PathGroup.hh`:L74*), `pushEnds`
+(*Source: `include/sta/PathGroup.hh`:L76*), the retention predicate `saveable` under the comment
+"Predicate to determine if a PathEnd is worth saving."
+(*Source: `include/sta/PathGroup.hh`:L77-L78*), `prune`
+(*Source: `include/sta/PathGroup.hh`:L97*), and the retained vector itself,
+`PathEndSeq path_ends_;` (*Source: `include/sta/PathGroup.hh`:L107*). `class PathGroups`
+(*Source: `include/sta/PathGroup.hh`:L116*) declares `makePathEnds` directly beneath the ownership
+comment "The PathEnds in the vector are owned by the PathGroups."
+(*Source: `include/sta/PathGroup.hh`:L136-L137*) — which is where the ownership half of section 9,
+invariant 1 is written down in the codebase's own words.
+
 **Enumeration.** Because grouping keeps only the worst end per CRPR tag, a separate enumerator
 recovers the rest. `PathGroups::enumPathEnds` (*Source: `search/PathGroup.cc`:L883-L910*) builds a
 `PathEnum` (*Source: `search/PathGroup.cc`:L893-L894*), inserts the saveable ends
@@ -145,7 +210,11 @@ recovers the rest. `PathGroups::enumPathEnds` (*Source: `search/PathGroup.cc`:L8
 re-inserts the peeled results (*Source: `search/PathGroup.cc`:L903-L906*). `PathEnum` is itself an
 iterator over the family — `class PathEnum : public Iterator<PathEnd*>, StaState` *Source:
 `search/PathEnum.hh`:L61* — introduced by its own comment, "Iterator to enumerate sucessively slower
-paths." (*Source: `search/PathEnum.hh`:L60*; the spelling is the repository's).
+paths." (*Source: `search/PathEnum.hh`:L60*; the spelling is the repository's). Its two family-facing
+members are `insert`, whose own comment states the ordering it assumes — "Insert path ends that are
+enumerated in slack/arrival order." (*Source: `search/PathEnum.hh`:L70-L71*) — and the `Iterator`
+override `PathEnd *next()` (*Source: `search/PathEnum.hh`:L74*), which is what hands the peeled ends
+back.
 
 **Formatting.** `ReportPath` formats an end by double dispatch: each concrete type's `reportShort`
 and `reportFull` call back into a type-specific overload, seven of each, declared at
@@ -153,13 +222,20 @@ and `reportFull` call back into a type-specific overload, seven of each, declare
 shows the shape of the callback:
 
 ```cpp
+PathEndCheck::reportShort(const ReportPath *report) const
+{
   report->reportShort(this);
 ```
 
-*Source: `search/PathEnd.cc`:L958.*
+*Source: `search/PathEnd.cc`:L956-L958*, the whole body of that member being
+`search/PathEnd.cc`:L955-L959.
 
 **Transport type.** Everything above moves the ends around as
-`using PathEndSeq = std::vector<PathEnd*>;` *Source: `include/sta/SearchClass.hh`:L110.*
+`using PathEndSeq = std::vector<PathEnd*>;` *Source: `include/sta/SearchClass.hh`:L110.* That alias is
+declared in the same header as the family's forward declaration, `class PathEnd;`
+(*Source: `include/sta/SearchClass.hh`:L46*), so a translation unit can traffic in the sequence without
+including `include/sta/PathEnd.hh` at all — which is a large part of why the type appears in so many
+files.
 
 ### 2.1 A consumer that is not reporting
 
@@ -170,9 +246,10 @@ enumeration's order is load-bearing. `MinPeriodEndVisitor::visit`
 
 ```cpp
   if ((end_type == PathEnd::Type::check || end_type == PathEnd::Type::output_delay)
+      && path->minMax(sta_) == MinMax::max() && src_edge->clock() == clk_
 ```
 
-*Source: `search/Sta.cc`:L3482.* So `Type` drives dispatch outside the reporting path as well.
+*Source: `search/Sta.cc`:L3482-L3483.* So `Type` drives dispatch outside the reporting path as well.
 
 **It is driven by its own traversal, not by the returned sequence.** `Sta::findClkMinPeriod`
 (*Source: `search/Sta.cc`:L3508-L3521*) constructs a local `VisitPathEnds visit_ends(this);`
@@ -391,7 +468,11 @@ it does not decide its own role — it asks the check edge at runtime.
 *PathEndCheck::checkRole(const StaState *) const` at `search/PathEnd.cc`:L961-L965, which ignores its
 `StaState` argument entirely. The roles that can come back are declared as
 `TimingRole::setup()`, `hold()`, `recovery()`, and `removal()` at
-`include/sta/TimingRole.hh`:L51-L54.
+`include/sta/TimingRole.hh`:L51-L54. The other leaf types name roles declared a few lines below those
+in the same header: `outputSetup()` and `outputHold()`
+(*Source: `include/sta/TimingRole.hh`:L59-L60*), `latchSetup()`
+(*Source: `include/sta/TimingRole.hh`:L63*), and `dataCheckSetup()` and `dataCheckHold()`
+(*Source: `include/sta/TimingRole.hh`:L65-L66*).
 
 ### 4.1 Reference table
 
@@ -410,24 +491,30 @@ margin comes from. Both are cited per row.
 
 `PathEndGatedClock` is the only type whose role **and** margin both arrive precomputed: both are
 constructor arguments (*Source: `include/sta/PathEnd.hh`:L442-L447*) stored verbatim in
-`check_role_` and `margin_` (*Source: `include/sta/PathEnd.hh`:L460-L461*) and returned unchanged.
+`check_role_` and `margin_` (*Source: `include/sta/PathEnd.hh`:L460-L461*) and returned unchanged. Its
+one-line class comment says what the endpoint is rather than what the class does — "Clock path
+constrained clock gating signal." (*Source: `include/sta/PathEnd.hh`:L438*).
 
 `PathEndUnconstrained` is the degenerate member of the family, and it exists so that an unconstrained
 endpoint is still reportable through the same interface. Its required time is the initial value for
 the *opposite* min/max sense:
 
 ```cpp
+PathEndUnconstrained::requiredTime(const StaState *sta) const
+{
   return delayInitValue(minMax(sta)->opposite());
 ```
 
-*Source: `search/PathEnd.cc`:L471, repeated verbatim in `requiredTimeOffset` at
-`search/PathEnd.cc`:L477.* Its margin is `delay_zero` (*Source: `search/PathEnd.cc`:L480-L484*), its
-slack is `INF` (*Source: `search/PathEnd.cc`:L486-L490*), and its source clock offset is `0.0`
+*Source: `search/PathEnd.cc`:L469-L471; the same return statement is repeated verbatim in
+`requiredTimeOffset` at `search/PathEnd.cc`:L477.* Its margin is `delay_zero`
+(*Source: `search/PathEnd.cc`:L480-L484*), its slack is `INF`
+(*Source: `search/PathEnd.cc`:L486-L490*), and its source clock offset is `0.0`
 (*Source: `search/PathEnd.cc`:L493-L497*).
 
-The `typeName()` strings above are the literals returned in `search/PathEnd.cc` at L508, L946, L1622,
-L1116, L1325, L1520, and L1766 respectively. Four of the seven are pinned by assertions in a
-committed unit test (*Source: `search/test/cpp/TestSearchStaInit.cc`:L3217,
+The `typeName()` strings above are string literals returned directly, one per type, at
+`search/PathEnd.cc`:L508, L946, L1622, L1116, L1325, L1520, L1766 — in the row order of the table
+above, which is not line order. Four of the seven are pinned by assertions in a committed unit test
+(*Source: `search/test/cpp/TestSearchStaInit.cc`:L3217,
 `search/test/cpp/TestSearchStaInit.cc`:L3233, `search/test/cpp/TestSearchStaInit.cc`:L3254,
 `search/test/cpp/TestSearchStaInit.cc`:L3270*). Three consumers read the string: two debug traces in
 path grouping (*Source: `search/PathGroup.cc`:L801, `search/PathGroup.cc`:L816*) and the JSON report
@@ -436,8 +523,65 @@ path grouping (*Source: `search/PathGroup.cc`:L801, `search/PathGroup.cc`:L816*)
 ### 4.2 Which type gets built — the factory decides, not `PathEnd`
 
 Neither subject file chooses a type. `search/VisitPathEnds.cc` does, and it is therefore the
-authority for this subsection. Inside `VisitPathEnds::visitClkedPathEnds`
-(*Source: `search/VisitPathEnds.cc`:L85*) the top-level order is fixed by the code's own comment:
+authority for this subsection.
+
+Selection happens at **two levels**, and conflating them is the easiest way to misread the factory.
+The outer level decides *whether* an endpoint yields a constrained end or the unconstrained fallback;
+the inner level decides *which* constrained type. The outer level is
+`VisitPathEnds::visitPathEnds`, the five-argument overload
+(*Source: `search/VisitPathEnds.cc`:L60-L82*), and it does three things in order: it skips bidirect
+driver vertices under the comment "Ignore slack on bidirect driver vertex.  The load vertex gets the
+slack." (*Source: `search/VisitPathEnds.cc`:L67-L68*), it walks the constrained routes with a
+by-reference flag (*Source: `search/VisitPathEnds.cc`:L73-L75*), and only then does it consider the
+fallback:
+
+```cpp
+    if (search_->unconstrainedPaths()
+        && !is_constrained)
+      visitUnconstrainedPathEnds(pin, vertex, scenes, min_max, filtered,
+```
+
+*Source: `search/VisitPathEnds.cc`:L76-L78*, the call continuing to `visitor);` on
+`search/VisitPathEnds.cc`:L79.
+
+| Level | Condition | Route taken | Source |
+|---|---|---|---|
+| Outer 1 | The vertex is not a bidirect driver | `visitClkedPathEnds`, carrying `bool is_constrained` by reference | `search/VisitPathEnds.cc`:L68, L73-L75 |
+| Outer 2 | `search_->unconstrainedPaths()` **and** `!is_constrained` | `visitUnconstrainedPathEnds`, which is the only producer of `PathEndUnconstrained` | `search/VisitPathEnds.cc`:L76-L79 |
+
+So `PathEndUnconstrained` is not one route among the constrained five below: it is a fallback, reached
+only when the endpoint produced **no** constrained end at all *and* the search was asked for
+unconstrained paths. Both halves of that condition are worth pinning down.
+
+- **Where the request comes from.** `unconstrainedPaths()` returns a stored flag
+  (*Source: `include/sta/Search.hh`:L93*) that `Search::findFilteredArrivals` assigns from its
+  `unconstrained` argument (*Source: `search/Search.cc`:L528*), which
+  `Search::findPathEnds` forwards from its own `unconstrained` parameter
+  (*Source: `search/Search.cc`:L477, `search/Search.cc`:L495*) — the same parameter the facade
+  declares at `include/sta/Sta.hh`:L948. It is therefore a per-query argument rather than a persistent
+  setting, which is what distinguishes it from the gated-clock precondition below, and the same flag
+  is passed on to path grouping (*Source: `search/Search.cc`:L507, `search/Search.cc`:L514*).
+- **How `is_constrained` becomes true.** It is declared `false` (*Source:
+  `search/VisitPathEnds.cc`:L73*), taken by reference through every constrained route as
+  `bool &is_constrained` (*Source: `search/VisitPathEnds.cc`:L91, `search/VisitPathEnds.cc`:L141,
+  `search/VisitPathEnds.cc`:L243, `search/VisitPathEnds.cc`:L299, `search/VisitPathEnds.cc`:L350,
+  `search/VisitPathEnds.cc`:L390, `search/VisitPathEnds.cc`:L506,
+  `search/VisitPathEnds.cc`:L544*), and set to `true` at nine sites, each on the line immediately
+  after a `visit` call: `search/VisitPathEnds.cc`:L122, L196, L202, L221, L269, L363, L376, L453,
+  L574. Nine, against eleven construction sites: the `PathEndLatchCheck` built for a path-delay
+  exception is visited at `search/VisitPathEnds.cc`:L215 without the flag being set, while its
+  sibling `PathEndPathDelay` branch does set it at `search/VisitPathEnds.cc`:L221, and the fallback's
+  own visit at `search/VisitPathEnds.cc`:L607 is downstream of the flag and does not set it either.
+  The code does not say whether the first of those two is deliberate, and this document does not
+  guess.
+- **The fallback applies its own filters.** `visitUnconstrainedPathEnds`
+  (*Source: `search/VisitPathEnds.cc`:L584*) tests scene membership, min/max match, disabled
+  constraints, generated clock source paths, the search filter, and false paths before it constructs
+  anything (*Source: `search/VisitPathEnds.cc`:L597-L605*), so reaching the gate is necessary but not
+  sufficient for a `PathEndUnconstrained` to exist.
+
+Inside `visitClkedPathEnds` (*Source: `search/VisitPathEnds.cc`:L85*) — the inner level — the
+top-level order is fixed by the code's own comment:
 
 ```cpp
       // set_output_delay to timing check has precedence.
@@ -520,10 +664,12 @@ where the pattern has a twist.
 Two precision points about these sets, both of which are easy to get wrong:
 
 - **`search/ReportPath.hh` does not declare seven `reportShort`; it declares seventeen.**
-  `grep -c 'void reportShort'` returns 17: the seven single-argument overloads at L92-L98, three
-  unrelated ones for other check kinds (`MinPulseWidthCheck` at L138, `MinPeriodCheck` at L146,
-  `MaxSkewCheck` at L152), and a further seven two-argument overloads at L185-L197 — which is itself
-  a third seven-fold recurrence inside that one file. `grep -c 'void reportFull'` returns 7 exactly.
+  `grep -c 'void reportShort'` returns 17: the seven single-argument overloads for this family
+  (*Source: `search/ReportPath.hh`:L92-L98*), three unrelated ones for other check kinds —
+  `MinPulseWidthCheck`, `MinPeriodCheck`, and `MaxSkewCheck` (*Source: `search/ReportPath.hh`:L138,
+  `search/ReportPath.hh`:L146, `search/ReportPath.hh`:L152*) — and a further seven two-argument
+  overloads (*Source: `search/ReportPath.hh`:L185-L197*), which is itself a third seven-fold
+  recurrence inside that one file. `grep -c 'void reportFull'` returns 7 exactly.
 - **The `ReportPath` declaration order is not the `Type` enumeration order.** `ReportPath` declares
   them as `PathEndUnconstrained, PathEndCheck, PathEndLatchCheck, PathEndPathDelay,
   PathEndOutputDelay, PathEndGatedClock, PathEndDataCheck`
@@ -609,15 +755,20 @@ path: `PathEndOutputDelay` overrides `targetClkEdge`, `targetClkDelay`, `targetC
 ### 5.4 The deliberate exception — `PathEndPathDelay` bypasses level two
 
 `PathEndPathDelay` derives from `PathEndClkConstrained`, **not** from `PathEndClkConstrainedMcp`
-(*Source: `include/sta/PathEnd.hh`:L499*). The header records the consequence next to it in the tree
-— "PathEndPathDelay (clock is optional)" (*Source: `include/sta/PathEnd.hh`:L51*) — and the factory
-states the reason in its own words:
+(*Source: `include/sta/PathEnd.hh`:L499*). The header records the consequence twice: in the tree, as
+"PathEndPathDelay (clock is optional)" (*Source: `include/sta/PathEnd.hh`:L51*), and in the class's own
+three-line comment — "Path constrained by set_min/max_delay." / ""Clocked" when path delay ends at
+timing check pin." / "May end at output with set_output_delay."
+(*Source: `include/sta/PathEnd.hh`:L496-L498*), which is the only class comment in the header that
+names all three of a type's situations. The factory states the reason in its own words:
 
 ```cpp
           // False paths and path delays override multicycle paths.
+          if (exception
+              && exception->isPathDelay()) {
 ```
 
-*Source: `search/VisitPathEnds.cc`:L262.* Because a `set_min_delay`/`set_max_delay` exception
+*Source: `search/VisitPathEnds.cc`:L262-L264.* Because a `set_min_delay`/`set_max_delay` exception
 overrides multicycle behavior, giving this type an `mcp_` field would model something that cannot
 happen; it therefore inherits the base's `multiCyclePath()` returning `nullptr`
 (*Source: `search/PathEnd.cc`:L276-L280*) and the base's `targetClkMcpAdjustment()` returning `0.0`
@@ -673,11 +824,14 @@ The shape of every one of them is this:
                          mcp_, path_delay_, src_clk_arrival_, margin(sta),
 ```
 
-*Source: `search/PathEnd.cc`:L1191-L1192.* The service side is declared in `search/Latches.hh`:
-public `latchRequired` at L52, `latchBorrowInfo` at L64, and `latchEnableOtherPath` at L90 — note that
-a **second, protected** `latchRequired` overload also exists, at `search/Latches.hh`:L101, so the
-public one is specifically L52. The definitions live in `search/Latches.cc` at L51, L166, L242, and
-L274, in a 606-line file; that is where the borrowing arithmetic actually is.
+*Source: `search/PathEnd.cc`:L1191-L1192.* The service side is declared in `search/Latches.hh`: public
+`latchRequired` (*Source: `search/Latches.hh`:L52*), `latchBorrowInfo`
+(*Source: `search/Latches.hh`:L64*), and `latchEnableOtherPath` (*Source: `search/Latches.hh`:L90*) —
+note that a **second, protected** `latchRequired` overload also exists
+(*Source: `search/Latches.hh`:L101*), so the public one is specifically L52. The four definitions live
+in a 606-line implementation file, at `search/Latches.cc`:L51, L166, L242, L274 — the public
+`latchRequired`, `latchBorrowInfo`, the protected `latchRequired` overload, and
+`latchEnableOtherPath` in that order. That file is where the borrowing arithmetic actually is.
 
 The one borrowing-adjacent quantity `PathEndLatchCheck` does compute itself is the enable pulse width,
 and it adds a clock period when the enable arrives after the disable:
@@ -713,14 +867,15 @@ This is exactly what the header's one-line class comment is telling the reader:
 
 ```cpp
 // PathEndClkConstrained::clk_path_ is the latch enable.
+class PathEndLatchCheck : public PathEndCheck
 ```
 
-*Source: `include/sta/PathEnd.hh`:L342.* So for this one type, the inherited `clk_path_` field means
-something different from what it means everywhere else in the chain — it is the enable edge, while the
-separate `disable_path_` field (*Source: `include/sta/PathEnd.hh`:L391*) holds the setup-check edge.
-`latchDisable()` returns that field, in a non-const and a const overload (*Source:
-`search/PathEnd.cc`:L1119-L1129*), and the check role
-follows from the enable's clock rather than from a check arc:
+*Source: `include/sta/PathEnd.hh`:L342-L343.* So for this one type, the inherited `clk_path_` field
+means something different from what it means everywhere else in the chain — it is the enable edge,
+while the separate `disable_path_` field (*Source: `include/sta/PathEnd.hh`:L391*) holds the
+setup-check edge. `latchDisable()` returns that field, in a non-const and a const overload
+(*Source: `search/PathEnd.cc`:L1119-L1129*), and the check role follows from the enable's clock rather
+than from a check arc:
 
 ```cpp
   if (clk_path_ && clk_path_->clkInfo(sta)->isPulseClk())
@@ -777,7 +932,7 @@ not the function objects, that hold the logic.
 
 | Comparator | Declared | Orders by | Tie-break | Verified call sites | Why it exists |
 |---|---|---|---|---|---|
-| `PathEndLess` | `include/sta/PathEnd.hh`:L556 | Slack, or **negated** arrival when slack comparison is switched off or the first end is unconstrained (*`search/PathEnd.cc`:L1980-L1982*) | The full four-step path chain (*`search/PathEnd.cc`:L1983-L1997*) | `sdc/FilterObjects.cc`:L556 · `search/PathGroup.cc`:L237 · `search/PathGroup.cc`:L631 · `search/PathGroup.cc`:L660 (member of `MakePathEnds1`) | Gives reporting a deterministic, reproducible order even when slacks are equal |
+| `PathEndLess` | `include/sta/PathEnd.hh`:L556 | Slack, or **negated** arrival when slack comparison is switched off or the first end is unconstrained (*`search/PathEnd.cc`:L1980-L1982*) | The full four-step path chain (*`search/PathEnd.cc`:L1983-L1997*) | `sdc/FilterObjects.cc`:L556 · `search/PathGroup.cc`:L237 · `search/PathGroup.cc`:L631 · `search/PathGroup.cc`:L660 (member of `MakePathEnds1`, initialised with `cmp_slack` true at `search/PathGroup.cc`:L665) | Gives reporting a deterministic, reproducible order even when slacks are equal |
 | `PathEndSlackLess` | `include/sta/PathEnd.hh`:L570 | Slack, or **negated** arrival when the first end is unconstrained (*`search/PathEnd.cc`:L2091-L2093*) | **None** — no pin, transition, or path chain at all | `search/PathGroup.cc`:L738 (member of `MakePathEndsAll`) | Selects the worst end without paying for tie-break work |
 | `PathEndNoCrprLess` | `include/sta/PathEnd.hh`:L583 | `exceptPathCmp` — evaluated **first**, and whenever it is nonzero its sign is the answer (*`search/PathEnd.cc`:L2108, L2114-L2115*) | `Path::cmpNoCrpr` on the two data paths, reached **only** when `exceptPathCmp` reports equality (*`search/PathEnd.cc`:L2109-L2112*) | `search/PathGroup.cc`:L611 — it is the ordering of a `std::set` · `search/PathGroup.cc`:L739 | Identifies ends that differ only by CRPR, so grouping can keep one per CRPR tag |
 
@@ -819,6 +974,18 @@ Both `PathEndLess` and `PathEndSlackLess` are constructed with a `cmp_slack` fla
 (*Source: `include/sta/PathEnd.hh`:L559-L560, `include/sta/PathEnd.hh`:L573-L574*);
 `PathEndNoCrprLess` takes only the `StaState` (*Source: `include/sta/PathEnd.hh`:L586*), because
 CRPR-insensitive identity ordering has nothing to do with slack.
+
+The de-duplication that `PathEndNoCrprLess` exists for is worth seeing in place, because it is the
+reason `PathEnum` is needed at all. In `MakePathEndsAll::vertexEnd`
+(*Source: `search/PathGroup.cc`:L783-L784*) each group's ends are first sorted with `PathEndLess`
+(*Source: `search/PathGroup.cc`:L789*) and then walked against a
+`PathEndNoCrprSet unique_ends(path_no_crpr_less_);` (*Source: `search/PathGroup.cc`:L790*); an end is
+kept only if the set does not already hold one that orders equal to it
+(*Source: `search/PathGroup.cc`:L798*). The two-line comment immediately above that test states the
+division of labour in the code's own words: "Only save the worst path end for each crpr tag." /
+"PathEnum will peel the others." *Source: `search/PathGroup.cc`:L796-L797.* The peeling is then
+requested per group from the multi-path branch of `PathGroups::makeGroupPathEnds`
+(*Source: `search/PathGroup.cc`:L852*).
 
 ### 7.2 The `exceptPathCmp` refinement chain — nine levels
 
@@ -901,6 +1068,9 @@ exactly what the comparison chain of section 7.2 does: `path_end2->check_arc_`
 (*Source: `search/PathEnd.cc`:L984*) and `path_end2->output_delay_`
 (*Source: `search/PathEnd.cc`:L1479*).
 
+Every line number in the `Line` column below is a line of `include/sta/PathEnd.hh`; the 26 run from
+`include/sta/PathEnd.hh`:L223-L224 in the base to L591 in the last comparator.
+
 | Owning class | Declaration | Line | Role |
 |---|---|---|---|
 | `PathEnd` | `Path *path_;` | L223 | The data path. Everything the base reports about the path — arrival, vertex, min/max, transition, source clock edge — is read through it. |
@@ -952,10 +1122,12 @@ is declared at `search/Crpr.hh`:L48.
 through a different service entry point —
 
 ```cpp
+  if (!crpr_valid_) {
+    CheckCrpr *check_crpr = sta->search()->checkCrpr();
     crpr_ = check_crpr->outputDelayCrpr(path_, targetClkEdge(sta));
 ```
 
-*Source: `search/PathEnd.cc`:L1402*, within `PathEndOutputDelay::crpr` at
+*Source: `search/PathEnd.cc`:L1400-L1402*, within `PathEndOutputDelay::crpr` at
 `search/PathEnd.cc`:L1397-L1405 — keyed on the target clock *edge* rather than the target clock
 *path*, which matters because an output-delay endpoint need not have a target clock path at all
 (section 9, invariant 5). `CheckCrpr::outputDelayCrpr` is declared at `search/Crpr.hh`:L56-L57,
@@ -1271,11 +1443,14 @@ against it.
 the body:
 
 ```cpp
+                                   const StaState *sta) :
   PathEndClkConstrainedMcp(data_path, nullptr, mcp),
+  data_clk_path_(data_clk_path),
 ```
 
-*Source: `search/PathEnd.cc`:L1568*, with the derivation `clk_path_ = clkPath(data_clk_path, sta);` at
-`search/PathEnd.cc`:L1572, inside the constructor at `search/PathEnd.cc`:L1563-L1573. The code states
+*Source: `search/PathEnd.cc`:L1567-L1569*, with the derivation
+`clk_path_ = clkPath(data_clk_path, sta);` at `search/PathEnd.cc`:L1572, inside the constructor at
+`search/PathEnd.cc`:L1563-L1573. The code states
 the null case itself: "clk_path_ can be null if data_clk_path is from an input port." *Source:
 `search/PathEnd.cc`:L1628.* That is also why `targetClkEdge` reads `data_clk_path_` rather than
 `clk_path_` (*Source: `search/PathEnd.cc`:L1629*).
@@ -1405,7 +1580,10 @@ constructors (*Source: `include/sta/PathEnd.hh`:L559-L560, `include/sta/PathEnd.
 ### A note on the convention sources themselves
 
 While confirming the style used in this document, one inconsistency turned up among the repository's
-own convention files and is recorded here for completeness. `.clang-format` sets
+own convention files and is recorded here for completeness. The comment style itself is not in dispute:
+the project asks for "comments - use capitalized sentences that end with periods"
+(*Source: `doc/CodingGuidelines.txt`:L13*), which is what the existing comments quoted throughout this
+document do. The line width is where the three sources disagree. `.clang-format` sets
 `ColumnLimit: 85` (*Source: `.clang-format`:L25*); `doc/CodingGuidelines.txt` says lines should be
 under 90 characters (*Source: `doc/CodingGuidelines.txt`:L49*); and
 `.cursor/rules/cpp-coding-standards.mdc`:L11 asks for under 90 "to match `.clang-format` (ColumnLimit:
@@ -1423,8 +1601,9 @@ golden-backed artifact, so no example here can drift out of true independently o
 
 ### 10.1 Golden regression scripts
 
-All nine scripts below exist under `search/test/`, each with a committed `.ok` golden whose line count
-was measured rather than estimated. All nine are live regressions, not orphan files: they are
+All nine scripts below exist under `search/test/`, each beside a committed golden of the same stem with
+a `.ok` extension, whose line count was measured rather than estimated. All nine are live regressions,
+not orphan files: they are
 registered in `search/test/CMakeLists.txt` under their names minus the `search_` prefix, inside a
 single `sta_module_tests("search" TESTS ...)` call. That call is defined at `CMakeLists.txt`:L705-L715
 and registers each entry as the CTest test `tcl.search.<name>` running `test/regression.sh` against
@@ -1476,6 +1655,27 @@ invariant 7 requires.
 Every location cited in this document, grouped by the authority it belongs to. The grouping is the
 point: a claim indexed under the wrong authority is a mis-sourced claim, and that is visible here
 without re-reading the prose.
+
+The correspondence runs both ways, and three conventions make checking it mechanical rather than a
+matter of reading carefully.
+
+- **Every file cited in sections 1 to 10 appears below, and every file below is cited above.** Diagram
+  node labels count as citations; the verbatim C++ excerpts do not, because their content is quoted
+  source rather than a claim about a location.
+- **Every line range cited above is covered by the rows below, and every range below is reached by at
+  least one citation above.** Where a run of line numbers follows a single path in prose — `L508, L946,
+  L1622` — the whole run belongs to that path. Four citations name a whole region as a single span —
+  the eleven construction sites at `search/VisitPathEnds.cc`:L120-L606, the fourteen single-argument
+  reporting overloads at `search/ReportPath.hh`:L92-L106, the field region at
+  `include/sta/PathEnd.hh`:L223-L549, and the comment-plus-declaration pair at
+  `include/sta/PathEnd.hh`:L342-L343 — and each of those is covered by the union of the rows that
+  partition it rather than by one row on its own.
+- **Filenames named in order to record their absence are deliberately not indexed.** The eight
+  documentation-generator configuration files listed in the front matter do not exist in this
+  repository, and indexing a nonexistent path would be the same class of error as citing a header under
+  a directory it does not live in — see the note on the `include/sta/PathGroup.hh` row in section 11.4.
+  For the same reason, the nine `include/sta` header names listed by basename in section 1 are prose,
+  not citations; the ones this document actually sources appear below with their full paths.
 
 ### 11.1 Structural authority — `include/sta/PathEnd.hh`
 
@@ -1531,6 +1731,7 @@ without re-reading the prose.
 | L270-L274 | Base `crpr` returns `0.0` |
 | L276-L280 | Base `multiCyclePath` returns `nullptr` |
 | L282-L294 | `PathEnd::exceptPathCmp` — chain level 1, raw ordinal comparison |
+| L462-L466 | `PathEndUnconstrained::isUnconstrained` — the one leaf predicate defined out of line |
 | L468-L497 | `PathEndUnconstrained` required time, margin, slack, source clock offset |
 | L508, L946, L1116, L1325, L1520, L1622, L1766 | The seven `typeName()` string literals |
 | L521-L526 | `PathEndClkConstrained::setPath` — the sole CRPR-cache invalidation |
@@ -1539,6 +1740,7 @@ without re-reading the prose.
 | L706-L712, L714-L723, L725-L734 | Required time, required time without CRPR, and slack |
 | L736-L749 | Chain level 2 (unchecked cast at L742-L743, dereferenced at L744) |
 | L753-L915 | The whole `PathEndClkConstrainedMcp` implementation region (`if (mcp_)` at L772; chain level 3 at L897-L915) |
+| L955-L959 | `PathEndCheck::reportShort` — the double-dispatch callback quoted in section 2 |
 | L961-L965, L967-L975 | `PathEndCheck::checkRole` and `::margin` |
 | L977-L994 | Chain level 4 |
 | L1080-L1099 | The `PathEndLatchCheck` constructor — `nullptr` at L1087, enable derived at L1092-L1094 |
@@ -1575,27 +1777,35 @@ without re-reading the prose.
 
 | Lines | Subject |
 |---|---|
-| L85 | `visitClkedPathEnds` — where selection begins |
+| L60-L82 | `VisitPathEnds::visitPathEnds`, the five-argument overload — the outer selection level |
+| L67-L68 | The bidirect-driver comment and the guard it introduces |
+| L73-L79 | `bool is_constrained` declared, the constrained walk, and the unconstrained fallback gate |
+| L85 | `visitClkedPathEnds` — where inner selection begins |
+| L91, L141, L243, L299, L350, L390, L506, L544 | The eight routine signatures taking `bool &is_constrained` |
 | L109-L129 | The five-step top-level selection order |
 | L135, L237, L342, L384, L533, L584 | The routines containing the construction sites |
-| L183-L184, L262, L368, L441, L564 | The "false paths and path delays override" comments |
+| L183-L184, L262-L264, L368, L441, L564 | The "false paths and path delays override" comments, with the guard the multicycle route introduces at L263-L264 |
 | L190-L195, L198-L201, L205-L215, L217-L221 | The checks-route discriminators |
 | L120, L192, L199, L212, L218, L266, L361, L374, L450, L572, L606 | The eleven construction sites |
 | L121, L195, L201, L215, L220, L268, L362, L375, L452, L573, L607 | The eleven matching `visit(&path_end)` calls |
+| L122, L196, L202, L221, L269, L363, L376, L453, L574 | The nine `is_constrained = true` sites — nine, not eleven |
+| L597-L605 | The six filters `visitUnconstrainedPathEnds` applies before constructing |
 
 ### 11.4 Where the family is used
 
 | Location | Subject |
 |---|---|
-| `include/sta/Sta.hh`:L942-L945 | The facade entry point and its ownership comment |
-| `include/sta/Search.hh`:L96-L97 | The producer and its ownership comment |
+| `include/sta/Sta.hh`:L942-L948 | The facade entry point, its ownership comment, and the `unconstrained` parameter |
+| `include/sta/Search.hh`:L93, L96-L97 | `unconstrainedPaths()`, then the producer and its ownership comment |
 | `search/Sta.cc`:L2718, L2741 | `Sta::findPathEnds` forwarding to the search engine |
-| `search/Search.cc`:L473-L519 | `Search::findPathEnds` (groups per mode at L504, L513; return at L518; check-flag gating at L498-L499) |
+| `search/Search.cc`:L473-L519 | `Search::findPathEnds` (the `unconstrained` parameter at L477, the forward at L495, groups per mode at L504, L513, the flag passed on at L507, L514, return at L518, check-flag gating at L498-L499) |
+| `search/Search.cc`:L528 | `Search::findFilteredArrivals` — where `unconstrained_paths_` is assigned |
 | `search/Sta.cc`:L3474-L3495 | `MinPeriodEndVisitor::visit` — `Type` dispatch outside reporting, at L3482 |
+| `search/Sta.cc`:L3508-L3521 | `Sta::findClkMinPeriod` — its own `VisitPathEnds` at L3514 and direct visit at L3518 |
 | `search/PathGroup.cc`:L164-L165 | Clone-then-`setPath`, the only mutation of a retained end |
 | `search/PathGroup.cc`:L177-L186, L188-L207 | `PathGroup::insert` (group assigned at L182) and `::prune` (sort L191, delete L204) |
 | `search/PathGroup.cc`:L237, L631, L660, L665, L738, L739, L747 | The comparator construction and member sites |
-| `search/PathGroup.cc`:L611, L790, L796-L798 | The `PathEndNoCrprLess`-ordered set and the "PathEnum will peel the others" comment |
+| `search/PathGroup.cc`:L611, L783-L784, L789, L790, L796-L798 | `MakePathEndsAll::vertexEnd`, the `PathEndLess` sort, the `PathEndNoCrprLess`-ordered set, and the "PathEnum will peel the others" comment |
 | `search/PathGroup.cc`:L617, L829, L838, L842, L852 | `makePathEnds`, `makeGroupPathEnds`, the two visitors, `enumPathEnds` |
 | `search/PathGroup.cc`:L691, L696, L780, L804-L805, L808 | The remaining `PathEnd::copy()` retention sites and the reason comment |
 | `search/PathGroup.cc`:L883-L910 | `enumPathEnds` — the `PathEnum` hand-off |
@@ -1606,8 +1816,9 @@ without re-reading the prose.
 | `search/Latches.hh`:L52, L64, L90, L101 | The borrowing service interface, public and protected |
 | `search/Latches.cc`:L51, L166, L242, L274 | The borrowing implementations |
 | `search/Crpr.hh`:L48-L49, L56-L57 | `CheckCrpr::checkCrpr` and `CheckCrpr::outputDelayCrpr`, the two cache-filling entry points |
-| `search/PathEnum.hh`:L60-L61, L71, L74 | `PathEnum` as an iterator over the family |
+| `search/PathEnum.hh`:L60-L61, L70-L71, L74 | `PathEnum` as an iterator over the family |
 | `sdc/FilterObjects.cc`:L551-L556 | `filterPathEnds` using `PathEndLess` |
+| `include/sta/VisitPathEnds.hh`:L41-L43, L44-L48 | The two `visitPathEnds` overloads — unfiltered all-scenes, and the five-argument reporting form |
 | `include/sta/VisitPathEnds.hh`:L142-L153 | `PathEndVisitor`, with the lifetime comment at L149 |
 | `include/sta/SearchClass.hh`:L46, L110, L115 | `PathEnd` forward declaration, `PathEndSeq`, `Crpr` |
 | `include/sta/Delay.hh`:L100-L104, L106 | The type aliases and `delay_zero` |
@@ -1615,7 +1826,12 @@ without re-reading the prose.
 | `include/sta/TimingRole.hh`:L51-L54, L59-L60, L63, L65-L66, L82 | The roles `checkRole()` can return, and `genericRole` |
 | `include/sta/MinMax.hh`:L70 | `opposite()` |
 | `include/sta/Mode.hh`:L66-L67, L93 | `Mode`'s path-groups accessors and member |
-| `include/sta/PathGroup.hh`:L50, L73, L74, L76, L78, L97, L107, L116, L137 | The path-group contract. The declarations live under `include/sta`; only the implementation `search/PathGroup.cc` is in `search/`. |
+| `include/sta/PathGroup.hh`:L49-L50, L73, L74, L76, L77-L78, L97, L107, L116, L136-L137 | The path-group contract, including the "owned by the PathGroups" comment. The declarations live under `include/sta`; only the implementation `search/PathGroup.cc` is in `search/`. |
+| `search/Search.i`:L68-L73, L353-L356, L390-L394 | The SWIG-visible `class PathEnd`, `find_path_ends`, and `report_path_end` |
+| `search/Property.i`:L124-L126 | `path_end_property` |
+| `sdc/Sdc.i`:L1566-L1572 | `filter_path_ends`, which both takes and returns a `PathEndSeq` |
+| `tcl/StaTclTypes.i`:L43, L1114-L1135 | The header include and the `PathEnd *` / `PathEndSeq *` typemaps, with the ownership comment at L1132 |
+| `tcl/Property.tcl`:L74-L75 | The Tcl command layer dispatching on the object type name `"PathEnd"` |
 
 ### 11.5 Behavioral evidence — committed tests
 
@@ -1628,6 +1844,21 @@ without re-reading the prose.
 | `search/test/search_latch_timing.tcl`:L14-L15, L59 · `search/test/search_latch_timing.ok`:L453-L460, L461-L465 | The golden that pins `is_latch_check` / `is_check` for latch and output-delay endpoints (section 9, invariant 3) |
 | `search/test/CMakeLists.txt`:L7, L12, L13, L21, L23, L35, L36, L54, L58 | Registration of the nine golden regression scripts |
 | `CMakeLists.txt`:L705-L715 | `sta_module_tests`, which turns those entries into CTest tests |
+
+The nine golden regression scripts of section 10.1, each cited whole rather than by line because each
+is an end-to-end script whose evidence is its companion `.ok` golden:
+
+| Script | Cited for |
+|---|---|
+| `search/test/search_path_end_types.tcl` | `PathEndOutputDelay`, `PathEndPathDelay`, and the recovery/removal roles of `PathEndCheck` |
+| `search/test/search_latch_timing.tcl` | `PathEndLatchCheck`, time borrowing, and invariant 3 |
+| `search/test/search_check_types_deep.tcl` | `PathEndCheck` across all check-type flag combinations |
+| `search/test/search_path_delay_output.tcl` | `PathEndPathDelay` and `PathEndOutputDelay` reporting together |
+| `search/test/search_data_check_gated.tcl` | `PathEndDataCheck` and `PathEndGatedClock` |
+| `search/test/search_report_gated_datacheck.tcl` | `PathEndGatedClock` and `PathEndDataCheck` reporting |
+| `search/test/search_json_unconstrained.tcl` | `PathEndUnconstrained` |
+| `search/test/search_crpr_data_checks.tcl` | CRPR across clock domains, with data checks |
+| `search/test/search_report_path_latch_expanded.tcl` | `PathEndLatchCheck` reporting with expanded clocks |
 
 ### 11.6 Convention authorities
 
