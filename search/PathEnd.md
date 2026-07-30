@@ -268,12 +268,14 @@ exists in that header. **Member entries carry the header's own types verbatim**,
 indirection and the `const` and `mutable` qualifiers, because dropping a `*` would misstate both
 nullability and ownership. Two things a class-diagram member entry cannot carry are elided: the
 default member initializers `{nullptr}` and `{false}`, and the `protected` access of every field —
-both are shown with their line numbers in the verbatim inventory of section 8.1. Method entries are
-abbreviated: their parameter lists and trailing `const` are dropped, and only the four pure virtual
-members plus `borrow()` are listed rather than the full member list. The return types shown are the
-header's own spellings: see section 8.3 for why `borrow()` returns `Arrival` and `margin()` returns
-`ArcDelay` when both are the same underlying type. Each concrete class carries its `Type` enumerator
-as an annotation.
+both are shown with their line numbers in the verbatim inventory of section 8.1. Each node lists its
+own class's **complete** field set, which is twenty-one of the twenty-six; the five not shown belong
+to the three comparators, which are not part of the tree and so do not appear in this diagram at all.
+Method entries are abbreviated: their parameter lists and trailing `const` are dropped, and only the
+four pure virtual members plus `borrow()` are listed rather than the full member list. The return
+types shown are the header's own spellings: see section 8.3 for why `borrow()` returns `Arrival` and
+`margin()` returns `ArcDelay` when both are the same underlying type. Each concrete class carries its
+`Type` enumerator as an annotation.
 
 ```mermaid
 classDiagram
@@ -329,7 +331,10 @@ classDiagram
     class PathEndPathDelay {
         <<path_delay>>
         PathDelay *path_delay_
+        TimingArc *check_arc_
+        Edge *check_edge_
         OutputDelay *output_delay_
+        Arrival src_clk_arrival_
     }
     PathEnd <|-- PathEndUnconstrained
     PathEnd <|-- PathEndClkConstrained
@@ -399,7 +404,7 @@ margin comes from. Both are cited per row.
 | `PathEndCheck` | `check` (1) | `"check"` | Setup, hold, recovery **or** removal — decided at runtime | `check_edge_->role()` (*`search/PathEnd.cc`:L961-L965*) | Derated check-arc delay (*`search/PathEnd.cc`:L967-L975*) |
 | `PathEndDataCheck` | `data_check` (2) | `"data_check"` | A data check between two data pins | `dataCheckSetup()` for max, else `dataCheckHold()` (*`search/PathEnd.cc`:L1668-L1675*) | The `DataCheck` margin (*`search/PathEnd.cc`:L1656-L1666*) |
 | `PathEndLatchCheck` | `latch_check` (3) | `"latch_check"` | Latch D-input setup, with borrowing | `setup()` for a pulse clock, else `latchSetup()` (*`search/PathEnd.cc`:L1155-L1165*) | Inherited from `PathEndCheck` (*`search/PathEnd.cc`:L967-L975*) |
-| `PathEndOutputDelay` | `output_delay` (4) | `"output_delay"` | `set_output_delay` at a port | `outputSetup()` for max, else `outputHold()` (*`search/PathEnd.cc`:L1360-L1367*) | The output-delay value, negated for the min sense (*`search/PathEnd.cc`:L1340-L1344` delegating to `search/PathEnd.cc`:L1346-L1358*) |
+| `PathEndOutputDelay` | `output_delay` (4) | `"output_delay"` | `set_output_delay` at a port | `outputSetup()` for max, else `outputHold()` (*`search/PathEnd.cc`:L1360-L1367*) | The output-delay value, negated for the min sense (*`search/PathEnd.cc`:L1340-L1344, delegating to `search/PathEnd.cc`:L1346-L1358*) |
 | `PathEndGatedClock` | `gated_clk` (5) | `"gated_clk"` | A gated-clock check | `return check_role_;` — supplied by the caller (*`search/PathEnd.cc`:L1523-L1527*) | `return margin_;` — supplied by the caller (*`include/sta/PathEnd.hh`:L454*) |
 | `PathEndPathDelay` | `path_delay` (6) | `"path_delay"` | `set_min_delay` / `set_max_delay` | `check_edge_->role()` when there is a check edge, else `setup()`/`hold()` by min/max (*`search/PathEnd.cc`:L1799-L1808*) | Three-way: derated check-arc delay when there is a check arc, else the output-delay margin when there is an output delay, else `delay_zero` (*`search/PathEnd.cc`:L1810-L1824*) |
 
