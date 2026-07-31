@@ -324,18 +324,19 @@ accessors that happen to be reachable from the engine — they are engine inputs
 load-bearing for required-time propagation and for worst-slack reporting, not only for the printed
 report. Second, `typeName()` is read outside reporting as well, which section 4.1 records.
 
-**Not every consumer arrives through a visit callback; some take a value the pipeline already
+**Not every consumer arrives through a visit callback; some take a result the pipeline already
 produced.** Two such consumers sit outside reporting. `filterPathEnds` takes the returned sequence —
 its parameter is `PathEndSeq *ends` (*Source: `sdc/FilterObjects.cc`:L551-L554*) — and it orders the
 filtered result with `PathEndLess` (*Source: `sdc/FilterObjects.cc`:L556*).
 `Properties::getProperty(PathEnd *, std::string_view)` takes a single retained end rather than a
 sequence (*Source: `search/Property.cc`:L1200-L1228*); it is the accessor behind `path_end_property`
-described in section 1. By-value consumption is not peculiar to those two, however: the reporting
-facade works the same way, since `reportPathEnd(PathEnd *end)` and `reportPathEnds(PathEndSeq *ends)`
-(*Source: `include/sta/Sta.hh`:L997-L998*) forward to the `ReportPath` entry point
-`ReportPath::reportPathEnds(const PathEndSeq *ends)` (*Source: `search/ReportPath.cc`:L320*). The
-distinction that matters for this section is therefore reporting versus not, not by-value versus
-callback.
+described in section 1. Receiving an already-produced result as a parameter is not peculiar to those
+two, however: the reporting facade works the same way, since `reportPathEnd(PathEnd *end)` and
+`reportPathEnds(PathEndSeq *ends)` (*Source: `include/sta/Sta.hh`:L997-L998*) forward to the
+`ReportPath` entry point `ReportPath::reportPathEnds(const PathEndSeq *ends)` (*Source:
+`search/ReportPath.cc`:L320*). Every one of those five parameters is a pointer, not a value. The
+distinction that matters for this section is therefore reporting versus not, not parameter-taking
+versus callback-driven.
 
 ### 2.2 Diagram 1 — the pipeline
 
@@ -899,7 +900,7 @@ information queries, not overrides: `Delay &borrow` at `include/sta/PathEnd.hh`:
 | `requiredTime` | `search/PathEnd.cc`:L1185-L1196 | `latches->latchRequired(...)`, returning only `required` |
 | `borrow` | `search/PathEnd.cc`:L1198-L1209 | the same call, returning only `borrow` |
 | `latchRequired` | `search/PathEnd.cc`:L1211-L1224 | the same call, returning all four out-parameters |
-| `latchBorrowInfo` | `search/PathEnd.cc`:L1226-L1246 | `latches->latchBorrowInfo(...)`, returning eight out-parameters |
+| `latchBorrowInfo` | `search/PathEnd.cc`:L1226-L1246 | `latches->latchBorrowInfo(...)`, returning all eight out-parameters — `nom_pulse_width`, `open_latency`, `latency_diff`, `open_uncertainty`, `open_crpr`, `crpr_diff`, `max_borrow`, `borrow_limit_exists`, in that declaration order (*`search/Latches.hh`:L70-L77*, mirrored at `include/sta/PathEnd.hh`:L380-L387) |
 
 The shape of every one of them is this:
 
@@ -990,7 +991,7 @@ sequenceDiagram
     L->>S: latchRequired(path_, targetClkPath(), latchDisable(), ...) - L1191
     S-->>L: required, borrow, adjusted_data_arrival, time_given_to_startpoint
     L->>S: latchBorrowInfo(path_, targetClkPath(), latchDisable(), ...) - L1239
-    S-->>L: nom_pulse_width, open_latency, latency_diff, max_borrow, borrow_limit_exists
+    S-->>L: nom_pulse_width, open_latency, latency_diff, open_uncertainty,<br/>open_crpr, crpr_diff, max_borrow, borrow_limit_exists
     Note over L: requiredTime() returns required - L1195<br/>borrow() returns borrow - L1208
 ```
 
@@ -1377,15 +1378,20 @@ by Search PathGroups" / "and deleted on next call." *Source: `include/sta/Sta.hh
 
 **Consequence.** A maintainer who stores a visited pointer writes a dangling-pointer bug. This is why
 `copy()` is pure virtual in the base (*Source: `include/sta/PathEnd.hh`:L71*) and why path grouping
-clones before retaining, at exactly five sites: `search/PathGroup.cc`:L164, L691, L696, L780, and
-L808. The reason for the clone at the last of those is stated in the code: "Give the group a copy of
-the path end because" / "it may delete it during pruning." *Source: `search/PathGroup.cc`:L804-L805*
-— and pruning does indeed delete (*Source: `search/PathGroup.cc`:L204*). Note that
+clones before retaining. `search/PathGroup.cc` calls `PathEnd::copy()` at five sites, and the
+difference between them matters: **four of the five retain the clone** — `search/PathGroup.cc`:L691,
+L696, L780, and L808 — while the fifth retains nothing. That one, `search/PathGroup.cc`:L164, is a
+transient probe clone inside `PathGroup::enumMinSlackUnderMin`: it is re-pointed at a different path
+at L165, its no-crpr slack is read at L166 and compared against `slack_min_` at L167, and it is
+deleted at L168 (*Source: `search/PathGroup.cc`:L164-L168*). The reason for the clone at L808 — a
+genuine retention site — is stated in the code: "Give the group a copy of the path end because" /
+"it may delete it during pruning." *Source: `search/PathGroup.cc`:L804-L805* — and pruning does
+indeed delete (*Source: `search/PathGroup.cc`:L204*). Note that
 `search/PathGroup.cc` contains eight further `copy()` occurrences (L650, L670, L726, L754, L958, L974,
 L983, L996) which are the *visitor* classes' own clone methods, not `PathEnd::copy()`.
 
 **Guarding test.** None directly. The invariant is documented in the header comment above and is
-otherwise enforced only by the discipline of the five clone sites.
+otherwise enforced only by the discipline of the four retention sites.
 
 ### Invariant 2 — The `Type` declaration order is semantics, not presentation
 
@@ -1608,11 +1614,17 @@ that fill them — `search/PathEnd.cc`:L695-L704 and the output-delay override a
 flag, so it is the single invalidation point for both fills.
 
 **Consequence.** The cache is correct only because the data path is replaced exclusively through
-`setPath`. That is exactly what the one caller that mutates a retained end does — it clones, then
-calls `setPath` on the clone (*Source: `search/PathGroup.cc`:L164-L165*). Reaching around `setPath`
-to change `path_` would leave a stale CRPR value behind. The base declares `setPath` virtual
-specifically so this override can exist (*Source: `include/sta/PathEnd.hh`:L76*, override at
-`include/sta/PathEnd.hh`:L269).
+`setPath`. Both production callers outside the family do exactly that, and both call it on a **fresh
+clone** rather than on an end another object is holding: `search/PathGroup.cc`:L164-L165 clones and
+then re-points the throwaway probe clone that L168 deletes, and `search/PathEnum.cc`:L496-L497 clones
+and then re-points the diverted end `PathEnumFaninVisitor::makeDivertedPathEnd` is building. The only
+other `setPath` call in the tree is a unit test that re-points a stack-local `PathEndUnconstrained` it
+owns outright (*Source: `search/test/cpp/TestSearchStaInit.cc`:L3773-L3779*), and it dispatches to the
+base `PathEnd::setPath`, whose two-line body has no cache to clear (*Source:
+`search/PathEnd.cc`:L56-L60*). Reaching around `setPath` to change `path_` would leave a stale CRPR
+value behind. The base declares
+`setPath` virtual specifically so this override can exist (*Source: `include/sta/PathEnd.hh`:L76*,
+override at `include/sta/PathEnd.hh`:L269).
 
 **Guarding test.** None specific.
 
@@ -1908,7 +1920,7 @@ matter of reading carefully.
 | Location | Subject |
 |---|---|
 | `include/sta/Sta.hh`:L942-L948 | The facade entry point, its ownership comment, and the `unconstrained` parameter |
-| `include/sta/Sta.hh`:L997-L998 | `reportPathEnd` and `reportPathEnds` — the facade's by-value reporting entry points |
+| `include/sta/Sta.hh`:L997-L998 | `reportPathEnd` and `reportPathEnds` — the facade's reporting entry points, each taking an already-produced end or sequence by pointer |
 | `include/sta/Search.hh`:L93, L96-L97 | `unconstrainedPaths()`, then the producer and its ownership comment |
 | `search/Sta.cc`:L2718, L2741 | `Sta::findPathEnds` forwarding to the search engine |
 | `search/Search.cc`:L473-L519 | `Search::findPathEnds` (the `unconstrained` parameter at L477, the forward at L495, groups per mode at L504, L513, the flag passed on at L507, L514, return at L518, check-flag gating at L498-L499) |
@@ -1925,23 +1937,24 @@ matter of reading carefully.
 | `search/MakeTimingModel.cc`:L241, L275-L295 | `MakeEndTimingArcs` and its `visit` — `targetClkEdge()` L280, `minMax()` L284, `targetClkDelay()` L286, `margin()` L287, and the `typeName()` debug trace at L294 |
 | `search/MakeTimingModel.cc`:L296-L297 | The debug-level-3 `reportPathEnd` call — the only route from the five non-reporting visitors into the reporting facade |
 | `search/MakeTimingModel.cc`:L351-L353 | Its own `VisitPathEnds` and the five-argument visit that drives it |
-| `search/PathGroup.cc`:L164-L165 | Clone-then-`setPath`, the only mutation of a retained end |
+| `search/PathGroup.cc`:L164-L168 | Clone-then-`setPath` on a throwaway probe clone that L168 deletes — not a retention site |
 | `search/PathGroup.cc`:L177-L186, L188-L207 | `PathGroup::insert` (group assigned at L182) and `::prune` (sort L191, delete L204) |
 | `search/PathGroup.cc`:L237, L631, L660, L665, L738, L739, L747 | The comparator construction and member sites |
 | `search/PathGroup.cc`:L611, L783-L784, L789, L790, L796-L798 | `MakePathEndsAll::vertexEnd`, the `PathEndSlackLess` sort, the `PathEndNoCrprLess`-ordered set, and the "PathEnum will peel the others" comment |
 | `search/PathGroup.cc`:L617, L829, L838, L842, L852 | `makePathEnds`, `makeGroupPathEnds`, the two visitors, `enumPathEnds` |
 | `search/PathGroup.cc`:L645, L719 | Where those two reporting visitors are declared |
-| `search/PathGroup.cc`:L691, L696, L780, L804-L805, L808 | The remaining `PathEnd::copy()` retention sites and the reason comment |
+| `search/PathGroup.cc`:L691, L696, L780, L804-L805, L808 | The four `PathEnd::copy()` retention sites and the reason comment |
 | `search/PathGroup.cc`:L883-L910 | `enumPathEnds` — the `PathEnum` hand-off |
 | `search/PathGroup.cc`:L962, L1004-L1005 | `MakeEndpointPathEnds` driving `VisitPathEnds` |
 | `search/PathGroup.cc`:L801, L816 · `search/ReportPath.cc`:L1064 · `search/MakeTimingModel.cc`:L292-L295 | The four `typeName()` consumers, the last being the timing-model debug trace whose `typeName()` argument is at L294 |
 | `search/ReportPath.cc`:L320 | `ReportPath::reportPathEnds` — the sequence-taking reporting entry point the facade forwards to |
 | `search/ReportPath.hh`:L92-L98, L100-L106 | The seven `reportShort` and seven `reportFull` single-argument overloads |
 | `search/ReportPath.hh`:L138, L146, L152, L185-L197 | The ten further `reportShort` overloads that are not part of that set |
-| `search/Latches.hh`:L52, L64, L90, L101 | The borrowing service interface, public and protected |
+| `search/Latches.hh`:L52, L64, L70-L77, L90, L101 | The borrowing service interface, public and protected, including the eight `latchBorrowInfo` out-parameters in declaration order |
 | `search/Latches.cc`:L51, L166, L242, L274 | The borrowing implementations |
 | `search/Crpr.hh`:L48-L49, L56-L57 | `CheckCrpr::checkCrpr` and `CheckCrpr::outputDelayCrpr`, the two cache-filling entry points |
 | `search/PathEnum.hh`:L60-L61, L70-L71, L74 | `PathEnum` as an iterator over the family |
+| `search/PathEnum.cc`:L496-L497 | `PathEnumFaninVisitor::makeDivertedPathEnd` — the second clone-then-`setPath` caller |
 | `sdc/FilterObjects.cc`:L551-L556 | `filterPathEnds` using `PathEndLess` |
 | `include/sta/VisitPathEnds.hh`:L41-L43, L44-L48 | The two `visitPathEnds` overloads — unfiltered all-scenes, and the five-argument reporting form |
 | `include/sta/VisitPathEnds.hh`:L142-L153 | `PathEndVisitor`, with the lifetime comment at L149 |
@@ -1968,6 +1981,7 @@ matter of reading carefully.
 |---|---|
 | `search/test/cpp/TestSearchStaInit.cc`:L1632-L1641 | All seven `Type` ordinals asserted |
 | `search/test/cpp/TestSearchStaInit.cc`:L3212-L3287 | Per-type construction, `typeName()`, predicates, and the three limitation comments at L3243, L3278-L3279, L3286 |
+| `search/test/cpp/TestSearchStaInit.cc`:L3773-L3779 | `TEST_F(StaInitTest, PathEndSetPath)` — the third `setPath` caller in the tree, a test that re-points an end it owns outright |
 | `search/test/cpp/TestSearchStaInit.cc`:L3861 | The comment recording that `deletePath` is declared but not defined |
 | `search/test/cpp/TestSearchStaDesign.cc`:L1484-L1498, L3353-L3366 | The two comparator tests on real path ends |
 | `search/test/cpp/TestSearchStaInitB.cc`:L643-L650 | `TEST_F(StaInitTest, PathEndUnconstrainedExceptPathCmp)` — the asserting guard on chain level 1, with the call at L648 and `EXPECT_EQ(cmp, 0)` at L649 |

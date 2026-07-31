@@ -75,7 +75,7 @@ class ReportPath;
 //
 // Lifetime: a PathEndVisitor is handed the address of a stack temporary inside
 // the factory, so anything that keeps an endpoint past the visit callback must
-// take a copy() of it first (search/PathGroup.cc:L164).
+// take a copy() of it first (search/PathGroup.cc:L808).
 //
 // See search/PathEnd.md for the family at length: the search and reporting
 // pipeline, the responsibility split, latch borrowing, the comparators, the
