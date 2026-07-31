@@ -14,6 +14,20 @@ inline `Source: <path>:L<line>` citation, and every count was derived mechanical
 rather than by eye. Section 11 indexes every citation by authority so the claims can be re-checked
 without re-reading the prose.
 
+**Resolving a citation in the tree that carries this file.** The tree this file is delivered in is
+that pinned revision plus exactly two paths — this file, which is new, and the comment-only header
+update disclosed below — so `d503c0ed` is an ancestor of it, and
+`git diff d503c0ed..HEAD --name-status` names those two paths and nothing else. Every other file cited
+here is therefore byte-identical at both revisions, and every line number given for one of them
+resolves in the tree you are holding. The one exception is `include/sta/PathEnd.hh` itself: 238
+comment lines were inserted into it, taking it from 594 lines to 832 while leaving the 594 pinned
+lines a byte-identical ordered subsequence. The dividing line is the `class PathEnd` declaration,
+pinned at line 59: every pinned line above it still sits at the same number in the delivered file, and
+every pinned line from that declaration onward is shifted down — by 24 lines at the declaration
+itself, growing monotonically to 238 lines by the end of the file. Two ways to resolve a shifted
+number: read the revision the number indexes, with `git show d503c0ed:include/sta/PathEnd.hh`; or
+navigate by name, since each row in section 11.1 names the subject its line range points at.
+
 **Reading order.** Sections 1 through 4 answer "what is this and which type handles my check"; a
 reader who needs only that can stop at section 4. Sections 5 through 8 are the internals. Section 9
 records the invariants and the rough edges. Sections 10 and 11 are evidence.
@@ -607,8 +621,8 @@ Neither subject file chooses a type. `search/VisitPathEnds.cc` does, and it is t
 authority for this subsection.
 
 Selection happens at **two levels**, and conflating them is the easiest way to misread the factory.
-The outer level decides *whether* an endpoint yields a constrained end or the unconstrained fallback;
-the inner level decides *which* constrained type. The outer level is
+The outer level decides *whether* the unconstrained fallback runs at all; the inner level decides
+*which* constrained type is built. The outer level is
 `VisitPathEnds::visitPathEnds`, the five-argument overload
 (*Source: `search/VisitPathEnds.cc`:L60-L82*), and it does three things in order: it skips bidirect
 driver vertices under the comment "Ignore slack on bidirect driver vertex.  The load vertex gets the
@@ -630,9 +644,12 @@ fallback:
 | Outer 1 | The vertex is not a bidirect driver | `visitClkedPathEnds`, carrying `bool is_constrained` by reference | `search/VisitPathEnds.cc`:L68, L73-L75 |
 | Outer 2 | `search_->unconstrainedPaths()` **and** `!is_constrained` | `visitUnconstrainedPathEnds`, which is the only producer of `PathEndUnconstrained` | `search/VisitPathEnds.cc`:L76-L79 |
 
-So `PathEndUnconstrained` is not one route among the constrained five below: it is a fallback, reached
-only when the endpoint produced **no** constrained end at all *and* the search was asked for
-unconstrained paths. Both halves of that condition are worth pinning down.
+So `PathEndUnconstrained` is not one route among the constrained five below: it is a fallback, and its
+gate is that flag rather than a tally of what was produced — it is reached when the search was asked
+for unconstrained paths *and* the constrained walk left `is_constrained` false. Read the second half
+literally: a false flag is **not** the same as "no constrained end was visited", because one
+constrained route visits a `PathEndLatchCheck` without setting it (*Source:
+`search/VisitPathEnds.cc`:L212-L215*). Both halves are worth pinning down.
 
 - **Where the request comes from.** `unconstrainedPaths()` returns a stored flag
   (*Source: `include/sta/Search.hh`:L93*) that `Search::findFilteredArrivals` assigns from its
@@ -1620,9 +1637,9 @@ then re-points the throwaway probe clone that L168 deletes, and `search/PathEnum
 and then re-points the diverted end `PathEnumFaninVisitor::makeDivertedPathEnd` is building. The only
 other `setPath` call in the tree is a unit test that re-points a stack-local `PathEndUnconstrained` it
 owns outright (*Source: `search/test/cpp/TestSearchStaInit.cc`:L3773-L3779*), and it dispatches to the
-base `PathEnd::setPath`, whose two-line body has no cache to clear (*Source:
-`search/PathEnd.cc`:L56-L60*). Reaching around `setPath` to change `path_` would leave a stale CRPR
-value behind. The base declares
+base `PathEnd::setPath`, whose body is a single assignment to `path_` and has no cache to clear
+(*Source: `search/PathEnd.cc`:L56-L60*). Reaching around `setPath` to change `path_` would leave a
+stale CRPR value behind. The base declares
 `setPath` virtual specifically so this override can exist (*Source: `include/sta/PathEnd.hh`:L76*,
 override at `include/sta/PathEnd.hh`:L269).
 
@@ -1800,6 +1817,13 @@ matter of reading carefully.
 
 ### 11.1 Structural authority — `include/sta/PathEnd.hh`
 
+Every line number in this subsection, and every `include/sta/PathEnd.hh` number elsewhere in this
+document, is a line of the pinned revision. In the tree that carries this file the header holds 238
+further comment lines, so only the ranges above the `class PathEnd` declaration are still at these
+numbers; `git show d503c0ed:include/sta/PathEnd.hh` reproduces the file these rows index, and the
+Subject column names what each range points at so a row can also be found by name. The front matter
+gives the full accounting.
+
 | Lines | Subject |
 |---|---|
 | L38-L41 | The four forward declarations |
@@ -1842,6 +1866,7 @@ matter of reading carefully.
 
 | Lines | Subject |
 |---|---|
+| L56-L60 | Base `PathEnd::setPath` — a single assignment to `path_`, with no CRPR cache to clear |
 | L104-L108 | `dataArrivalTime` |
 | L110-L116, L118-L124 | The two source-clock-offset wrappers |
 | L219-L223 | Base `targetClkMcpAdjustment` returns `0.0` |
@@ -1944,6 +1969,7 @@ matter of reading carefully.
 | `search/PathGroup.cc`:L617, L829, L838, L842, L852 | `makePathEnds`, `makeGroupPathEnds`, the two visitors, `enumPathEnds` |
 | `search/PathGroup.cc`:L645, L719 | Where those two reporting visitors are declared |
 | `search/PathGroup.cc`:L691, L696, L780, L804-L805, L808 | The four `PathEnd::copy()` retention sites and the reason comment |
+| `search/PathGroup.cc`:L650, L670, L726, L754, L958, L974, L983, L996 | The eight `copy()` occurrences that belong to the *visitor* classes rather than to `PathEnd::copy()` — three declarations (L650, L726, L958), three definitions (L670, L754, L996), and the two `MakeEndpointPathEnds` constructors that initialize their `PathEndVisitor *` member by cloning one (L974, L983) |
 | `search/PathGroup.cc`:L883-L910 | `enumPathEnds` — the `PathEnum` hand-off |
 | `search/PathGroup.cc`:L962, L1004-L1005 | `MakeEndpointPathEnds` driving `VisitPathEnds` |
 | `search/PathGroup.cc`:L801, L816 · `search/ReportPath.cc`:L1064 · `search/MakeTimingModel.cc`:L292-L295 | The four `typeName()` consumers, the last being the timing-model debug trace whose `typeName()` argument is at L294 |
