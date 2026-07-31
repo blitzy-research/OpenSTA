@@ -1041,10 +1041,15 @@ Three points about that table that are easy to get wrong:
   tie-break, and the fact that it never consults a `cmp_slack_` flag — see section 9, observation 14.
 - **The arrival comparison is negated, and it is min/max aware.** The negation appears in both
   `PathEnd::cmp` (*Source: `search/PathEnd.cc`:L1981*) and `PathEndSlackLess::operator()`
-  (*Source: `search/PathEnd.cc`:L2092*), because a later arrival is the worse path while a smaller
-  slack is the worse path. `PathEnd::cmpArrival` itself compares through the path's min/max sense:
-  `delayLess(arrival1, arrival2, min_max, sta)` *Source: `search/PathEnd.cc`:L2041*, within
-  `search/PathEnd.cc`:L2031-L2045.
+  (*Source: `search/PathEnd.cc`:L2092*), because the two primary keys already run in opposite
+  directions: `cmpSlack` sorts the smaller — that is, the worse — slack first (*Source:
+  `search/PathEnd.cc`:L2025-L2026*), whereas `cmpArrival` sorts the better arrival first. Which
+  arrival is the worse one is not fixed: it is the later arrival under max analysis and the earlier
+  arrival under min. `PathEnd::cmpArrival` assumes neither, because it compares through the path's
+  own min/max sense — `delayLess(arrival1, arrival2, min_max, sta)` with
+  `min_max = path_end1->minMax(sta)` (*Source: `search/PathEnd.cc`:L2038, L2041*, within
+  `search/PathEnd.cc`:L2031-L2045) — and that `delayLess` overload is numeric less-than for max and
+  numeric greater-than for min (*Source: `dcalc/Delay.cc`:L341-L351*).
 
 `PathEndLess`'s tie-break is a four-step chain applied only when the primary comparison returns zero:
 pin, transition, and clock of the data path; then the same for the target clock path; then a full
@@ -1061,8 +1066,10 @@ CRPR-insensitive identity ordering has nothing to do with slack.
 
 The de-duplication that `PathEndNoCrprLess` exists for is worth seeing in place, because it is the
 reason `PathEnum` is needed at all. In `MakePathEndsAll::vertexEnd`
-(*Source: `search/PathGroup.cc`:L783-L784*) each group's ends are first sorted with `PathEndLess`
-(*Source: `search/PathGroup.cc`:L789*) and then walked against a
+(*Source: `search/PathGroup.cc`:L783-L784*) each group's ends are first sorted with
+`PathEndSlackLess` — the `less_` member declared at `search/PathGroup.cc`:L738 and initialised with
+`cmp_slack` true at `search/PathGroup.cc`:L747, so the worst come first
+(*Source: `search/PathGroup.cc`:L789*) — and then walked against a
 `PathEndNoCrprSet unique_ends(path_no_crpr_less_);` (*Source: `search/PathGroup.cc`:L790*); an end is
 kept only if the set does not already hold one that orders equal to it
 (*Source: `search/PathGroup.cc`:L798*). The two-line comment immediately above that test states the
@@ -1188,7 +1195,7 @@ Every line number in the `Line` column below is a line of `include/sta/PathEnd.h
 | `PathEndOutputDelay` | `OutputDelay *output_delay_;` | L435 | The `set_output_delay` constraint that supplies the margin. |
 | `PathEndGatedClock` | `const TimingRole *check_role_;` | L460 | The check role, precomputed by the factory and returned verbatim (*`search/PathEnd.cc`:L1523-L1527*). |
 | `PathEndGatedClock` | `ArcDelay margin_;` | L461 | The margin, precomputed by the factory and returned inline (*`include/sta/PathEnd.hh`:L454*). |
-| `PathEndDataCheck` | `Path *data_clk_path_;` | L492 | The related data clock path. Returned by `dataClkPath()` (*`include/sta/PathEnd.hh`:L483*) and used for the target clock edge (*`search/PathEnd.cc`:L1629*). |
+| `PathEndDataCheck` | `Path *data_clk_path_;` | L492 | Despite the name, the path arriving at the pin the check is made *against* — the `set_data_check` `-from` pin, whose load vertex the factory iterates (*`search/VisitPathEnds.cc`:L516-L517, L550-L553, L572*) — and not that pin's clock path. The clock path is `clk_path_`, derived by walking back from this one (*`search/PathEnd.cc`:L1572*, via `PathEndDataCheck::clkPath` at *`search/PathEnd.cc`:L1577-L1605*). Returned by `dataClkPath()` (*`include/sta/PathEnd.hh`:L483*); its arrival and its clock edge feed the target side of the check (*`search/PathEnd.cc`:L1635-L1636*), which is why `targetClkEdge()` reads it rather than `clk_path_` (*`search/PathEnd.cc`:L1626-L1630*). |
 | `PathEndDataCheck` | `DataCheck *check_;` | L493 | The `set_data_check` constraint supplying the margin (*`search/PathEnd.cc`:L1656-L1666*). |
 | `PathEndPathDelay` | `PathDelay *path_delay_;` | L543 | The `set_min_delay`/`set_max_delay` exception. Returned by `pathDelay()` (*`include/sta/PathEnd.hh`:L526*). |
 | `PathEndPathDelay` | `TimingArc *check_arc_;` | L544 | Present when the path delay ends at a timing check pin; null makes the margin external (*`search/PathEnd.cc`:L1793-L1797*). |
@@ -1196,10 +1203,10 @@ Every line number in the `Line` column below is a line of `include/sta/PathEnd.h
 | `PathEndPathDelay` | `OutputDelay *output_delay_;` | L547 | Header comment: "Output delay is nullptr when there is no output delay at the endpoint." (*`include/sta/PathEnd.hh`:L546*). Tested by `hasOutputDelay()` (*`include/sta/PathEnd.hh`:L536*). |
 | `PathEndPathDelay` | `Arrival src_clk_arrival_;` | L549 | Header comment: "Source clk arrival for set_min/max_delay -ignore_clk_latency." (*`include/sta/PathEnd.hh`:L548*). Feeds the source clock offset (*`search/PathEnd.cc`:L1829*). |
 | `PathEndLess` | `bool cmp_slack_;` | L565 | Comparator configuration. Read at `search/PathEnd.cc`:L2075. |
-| `PathEndLess` | `const StaState *sta_;` | L566 | Comparator configuration — the state handle every query needs. |
+| `PathEndLess` | `const StaState *sta_;` | L566 | The analysis state the delay and path comparisons need; `operator()` passes it, together with `cmp_slack_`, to `PathEnd::less` (*`search/PathEnd.cc`:L2075*). |
 | `PathEndSlackLess` | `bool cmp_slack_;` | L579 | Comparator configuration. Initialized at `search/PathEnd.cc`:L2082 and never read; see section 9, observation 14. |
-| `PathEndSlackLess` | `const StaState *sta_;` | L580 | Comparator configuration. |
-| `PathEndNoCrprLess` | `const StaState *sta_;` | L591 | Comparator configuration. This comparator has no slack flag, by design. |
+| `PathEndSlackLess` | `const StaState *sta_;` | L580 | The analysis state `operator()` passes to `PathEnd::cmpSlack` and `PathEnd::cmpArrival` (*`search/PathEnd.cc`:L2092-L2093*). |
+| `PathEndNoCrprLess` | `const StaState *sta_;` | L591 | The analysis state `operator()` passes to `PathEnd::exceptPathCmp` and `Path::cmpNoCrpr` (*`search/PathEnd.cc`:L2108, L2112*); this comparator has no slack flag, by design. |
 
 That is 2 + 3 + 1 + 2 + 3 + 1 + 2 + 2 + 5 + 2 + 2 + 1 = 26.
 
@@ -1860,7 +1867,9 @@ matter of reading carefully.
 | L1523-L1527 | `PathEndGatedClock::checkRole` returns the precomputed role |
 | L1541-L1559 | Chain level 7 |
 | L1563-L1573 | The `PathEndDataCheck` constructor — `nullptr` at L1568, derivation at L1572 |
-| L1628-L1629 | The null-`clk_path_` comment and `targetClkEdge` |
+| L1577-L1605 | `PathEndDataCheck::clkPath` — the walk back from the data path that derives `clk_path_`, returning the first clock path, the predecessor of a register or latch clock-to-Q arc, a latch enable path, or `nullptr` when none is reached |
+| L1625-L1630 | `PathEndDataCheck::targetClkEdge` — the null-`clk_path_` comment at L1628 and the `data_clk_path_` read at L1629 |
+| L1632-L1654 | `PathEndDataCheck::requiredTimeNoCrpr` — the `data_clk_path_` arrival and clock-edge reads at L1635-L1636 |
 | L1656-L1666 | `PathEndDataCheck::margin` |
 | L1668-L1675 | `PathEndDataCheck::checkRole` |
 | L1689-L1707 | Chain level 8 |
@@ -1869,7 +1878,7 @@ matter of reading carefully.
 | L1936-L1961 | Chain level 9 — two discriminators |
 | L1965-L1972, L1974-L1999 | `PathEnd::less` and `PathEnd::cmp` (decision L1980-L1982; tie-break L1983-L1997) |
 | L2001-L2029 | `PathEnd::cmpSlack` — latch special case L2008-L2022 |
-| L2031-L2045 | `PathEnd::cmpArrival` — min/max aware at L2041 |
+| L2031-L2045 | `PathEnd::cmpArrival` — min/max aware, the sense taken at L2038 and applied at L2041 |
 | L2047-L2060 | `PathEnd::cmpNoCrpr` — consumes the chain at L2052 |
 | L2064-L2076 | `PathEndLess` — constructor and the one-line forward at L2075 |
 | L2080-L2095 | `PathEndSlackLess` — `cmp_slack_` stored at L2082, never read |
@@ -1888,6 +1897,7 @@ matter of reading carefully.
 | L135, L237, L342, L384, L533, L584 | The routines containing the construction sites |
 | L183-L184, L262-L264, L368, L441, L564 | The "false paths and path delays override" comments, with the guard the multicycle route introduces at L263-L264 |
 | L190-L195, L198-L201, L205-L215, L217-L221 | The checks-route discriminators |
+| L516-L517, L550-L553 | The data-check route — the `set_data_check` `-from` pin and its load vertex, then the iteration over the paths arriving there that supplies `data_clk_path_` |
 | L120, L192, L199, L212, L218, L266, L361, L374, L450, L572, L606 | The eleven construction sites |
 | L121, L195, L201, L215, L220, L268, L362, L375, L452, L573, L607 | The eleven matching `visit(&path_end)` calls |
 | L122, L196, L202, L221, L269, L363, L376, L453, L574 | The nine `is_constrained = true` sites — nine, not eleven |
@@ -1918,7 +1928,7 @@ matter of reading carefully.
 | `search/PathGroup.cc`:L164-L165 | Clone-then-`setPath`, the only mutation of a retained end |
 | `search/PathGroup.cc`:L177-L186, L188-L207 | `PathGroup::insert` (group assigned at L182) and `::prune` (sort L191, delete L204) |
 | `search/PathGroup.cc`:L237, L631, L660, L665, L738, L739, L747 | The comparator construction and member sites |
-| `search/PathGroup.cc`:L611, L783-L784, L789, L790, L796-L798 | `MakePathEndsAll::vertexEnd`, the `PathEndLess` sort, the `PathEndNoCrprLess`-ordered set, and the "PathEnum will peel the others" comment |
+| `search/PathGroup.cc`:L611, L783-L784, L789, L790, L796-L798 | `MakePathEndsAll::vertexEnd`, the `PathEndSlackLess` sort, the `PathEndNoCrprLess`-ordered set, and the "PathEnum will peel the others" comment |
 | `search/PathGroup.cc`:L617, L829, L838, L842, L852 | `makePathEnds`, `makeGroupPathEnds`, the two visitors, `enumPathEnds` |
 | `search/PathGroup.cc`:L645, L719 | Where those two reporting visitors are declared |
 | `search/PathGroup.cc`:L691, L696, L780, L804-L805, L808 | The remaining `PathEnd::copy()` retention sites and the reason comment |
@@ -1937,6 +1947,7 @@ matter of reading carefully.
 | `include/sta/VisitPathEnds.hh`:L142-L153 | `PathEndVisitor`, with the lifetime comment at L149 |
 | `include/sta/SearchClass.hh`:L46, L110, L115 | `PathEnd` forward declaration, `PathEndSeq`, `Crpr` |
 | `include/sta/Delay.hh`:L100-L104, L106 | The type aliases and `delay_zero` |
+| `dcalc/Delay.cc`:L341-L351 | The min/max-aware `delayLess` overload — numeric less-than for max, numeric greater-than for min |
 | `include/sta/Path.hh`:L142, L150, L154 | `cmpPinTrClk`, `cmpNoCrpr`, `cmpAll` |
 | `include/sta/TimingRole.hh`:L51-L54, L59-L60, L63, L65-L66, L82 | The roles `checkRole()` can return, and `genericRole` |
 | `include/sta/MinMax.hh`:L70 | `opposite()` |
