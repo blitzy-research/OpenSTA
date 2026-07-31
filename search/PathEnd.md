@@ -22,11 +22,18 @@ records the invariants and the rough edges. Sections 10 and 11 are evidence.
 
 - **This is documentation only.** It describes the `PathEnd` family as it stands and prescribes
   nothing. Where a statement could be read as advice, it is not: every item in section 9 is an
-  observation about existing code. The only artifact this work adds to the repository is this file.
-- **No code, behavior, or signature changed.** Every file cited below was read, never edited — no
-  source, header, test, golden, build, or CI file was touched, and that includes the two subject files
-  `include/sta/PathEnd.hh` and `search/PathEnd.cc`. Nothing here is compiled, linked, installed, or
-  executed either; the build evidence for that is under "Notes on form" below.
+  observation about existing code. The only new file this work adds to the repository is this one, and
+  the only other change is the comment-only header update disclosed in the next bullet.
+- **No code, behavior, or signature changed.** No test, golden, build, or CI file was touched, and
+  `search/PathEnd.cc` — along with every other authority, consumer, and convention file cited below —
+  was read and never edited. There is exactly one exception to "read only": the companion header
+  `include/sta/PathEnd.hh` received a **purely additive, comment-only** documentation update in the
+  same milestone as this file. Its comment-stripped preprocessor output is byte-identical to the pinned
+  revision, so no declaration, signature, enumerator order, include, or preprocessor directive changed
+  there either. Two consequences worth stating: every `include/sta/PathEnd.hh` line number cited in
+  this document refers to the pinned revision named above, before those comment lines were inserted;
+  and nothing here is compiled, linked, installed, or executed — the build evidence for that is under
+  "Notes on form" below.
 - **No external source is cited anywhere in this document.** Every claim resolves to a location in
   this repository, and every convention resolves to a repository authority — `doc/CodingGuidelines.txt`
   for comment style, `.clang-format` as a value source only, `.cursor/rules/*.mdc`, `dcalc/Arnoldi.txt`
@@ -46,7 +53,8 @@ records the invariants and the rough edges. Sections 10 and 11 are evidence.
   definition (section 9, invariant 4), a three-way disagreement about whether an output delay has a
   target clock path (invariant 5), casts made without a null test (invariant 6), and a field that is
   written and never read (observation 14). Each is written down with its evidence and left exactly as
-  it is, because the files that carry them are read-only to this document.
+  it is: `search/PathEnd.cc` is not edited at all, and the header change described above adds comments
+  only, so nothing that carries a defect is repaired.
 
 **Bounded scope, stated plainly: per-method documentation is deliberately not attempted.** The base
 class alone declares **73** distinct member-function names — 69 in its public run at
@@ -1475,8 +1483,9 @@ three.
 **Consequence.** A reader who trusts the constructor comment alone will conclude the null branches are
 dead code; they are not.
 
-**This is recorded, not repaired.** The implementation file is outside this document's edit surface,
-and the header is owned elsewhere.
+**This is recorded, not repaired.** The implementation file is not edited at all, so side one stands
+as written, and the comment-only header update disclosed in the front matter left side two — the
+comment at `include/sta/PathEnd.hh`:L398 — verbatim rather than correcting it.
 
 ### Invariant 6 — The `exceptPathCmp` overrides cast without checking
 
