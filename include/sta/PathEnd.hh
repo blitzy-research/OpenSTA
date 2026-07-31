@@ -56,9 +56,57 @@ class ReportPath;
 //    PathEndGatedClock
 //    PathEndDataCheck
 //
+// Which check or constraint each concrete type models, taken from the
+// checkRole() implementations in search/PathEnd.cc:
+//  PathEndUnconstrained - no constraint applies; the required time is the
+//    initial value for the opposite min/max sense, the margin is zero, and the
+//    slack is infinite (search/PathEnd.cc:L468-L490).
+//  PathEndCheck - setup, hold, recovery or removal; the role is the check
+//    edge's role, so all four are this one class (search/PathEnd.cc:L961-L965).
+//  PathEndLatchCheck - latch D input setup; setup() for a pulse clock and
+//    latchSetup() otherwise (search/PathEnd.cc:L1155-L1165).
+//  PathEndOutputDelay - set_output_delay; outputSetup() for max and
+//    outputHold() for min (search/PathEnd.cc:L1360-L1367).
+//  PathEndGatedClock - gated clock check; the role is supplied at construction
+//    (search/PathEnd.cc:L1523-L1527).
+//  PathEndDataCheck - set_data_check; dataCheckSetup() for max and
+//    dataCheckHold() for min (search/PathEnd.cc:L1668-L1675).
+//  PathEndPathDelay - set_min_delay/set_max_delay; the check edge's role when
+//    the path delay ends at a timing check, otherwise setup for max and hold
+//    for min (search/PathEnd.cc:L1799-L1808).
+//
+// Which of those types is built for a given endpoint is decided by the factory
+// in search/VisitPathEnds.cc, not by anything declared here.  search/PathEnd.md
+// documents the family at length: the search and reporting pipeline it sits in,
+// the responsibility split across the clock constrained chain, latch time
+// borrowing, the comparators, the member field inventory, and the invariants a
+// maintainer must respect.
+//
+// PathEnd itself is abstract and is never instantiated: copy(), type(),
+// typeName(), reportShort(), reportFull(), requiredTime(), margin(), slack(),
+// slackNoCrpr() and sourceClkOffset() are all pure virtual, and the constructor
+// is protected.  What this class contributes is the single contract every
+// endpoint answers - arrival, required time, margin, slack, crpr and the target
+// clock accessors - so that reporting and path grouping can treat a constrained
+// and an unconstrained endpoint identically.
+//
+// Lifetime: the endpoints handed to a PathEndVisitor are stack temporaries
+// inside the factory, so anything that keeps an endpoint past the visit
+// callback must take a copy() of it first (search/PathGroup.cc:L164).
 class PathEnd
 {
 public:
+  // Exactly one enumerator per concrete subclass, seven of each; the three
+  // abstract classes have none.  This order is semantics, not presentation:
+  // exceptPathCmp compares these enumerators as ordinals, so the order written
+  // here decides how endpoints of different kinds sort against each other
+  // (search/PathEnd.cc:L282-L294).  The ordinal values are additionally
+  // asserted by TEST_F(StaInitTest, PathEndTypeValues) in
+  // search/test/cpp/TestSearchStaInit.cc:L1632-L1641, and dispatch outside the
+  // reporting path branches on them (search/Sta.cc:L3481-L3482), so reordering
+  // this list changes ordering behavior and breaks a committed test.
+  // It is its own order: it matches neither the hierarchy listed above nor the
+  // order of the reporting overloads (search/ReportPath.hh:L92-L106).
   enum class Type { unconstrained,
                     check,
                     data_check,
@@ -70,6 +118,9 @@ public:
 
   virtual PathEnd *copy() const = 0;
   virtual ~PathEnd() = default;
+  // Observation: this member is declared here and defined nowhere in the
+  // repository.  The unit tests record the same finding
+  // (search/test/cpp/TestSearchStaInit.cc:L3861).
   void deletePath();
   Path *path() { return path_; }
   const Path *path() const { return path_; }
@@ -220,10 +271,28 @@ protected:
                                const StaState *sta);
   virtual int setupDefaultCycles() const { return 1; }
 
+  // The data path this endpoint terminates.  Everything the family reports
+  // about the data side is read back out of it: arrival time, vertex, min/max
+  // sense, transition, and source clock edge, each of those accessors simply
+  // forwarding to it (search/PathEnd.cc:L68-L102).
   Path *path_;
+  // The reporting bucket this endpoint was sorted into.  It is filled in by
+  // path grouping through setPathGroup() rather than at construction, so it is
+  // null on an endpoint that has not yet been grouped
+  // (search/PathGroup.cc:L182).
   PathGroup *path_group_{nullptr};
 };
 
+// The endpoint that no constraint reaches.  It exists so that an unconstrained
+// endpoint can be reported through the same interface as a constrained one
+// instead of being a special case in the reporting code, and it answers that
+// contract with neutral values: required time is the initial value for the
+// opposite min/max sense, the margin is zero, and the slack is infinite
+// (search/PathEnd.cc:L468-L490).  It is the only concrete type with no target
+// clock, which is why it derives straight from PathEnd and keeps the base
+// accessors that return null (search/PathEnd.cc:L166, L232, L238).  Both
+// comparators special case it, ordering it by negated arrival rather than by
+// its infinite slack (search/PathEnd.cc:L1980-L1982, L2091-L2093).
 class PathEndUnconstrained : public PathEnd
 {
 public:
@@ -242,6 +311,16 @@ public:
   float sourceClkOffset(const StaState *sta) const override;
 };
 
+// Abstract; the protected constructor keeps it from being instantiated.
+// It is the base of every endpoint that is constrained against a target clock,
+// and it exists to own the two things all of them share.  The first is state:
+// the target clock path, plus a lazily cached crpr value for the data path and
+// clock path pair.  The second is algebra: the required time before crpr is the
+// target clock arrival adjusted by the margin, subtracting it for setup and
+// adding it for hold; the check crpr is then added on; and slack is required
+// minus arrival for setup and arrival minus required for hold
+// (search/PathEnd.cc:L706-L734).  Every clocked leaf type therefore only has to
+// supply its own margin and check role.
 class PathEndClkConstrained : public PathEnd
 {
 public:
@@ -266,6 +345,10 @@ public:
   Slack slackNoCrpr(const StaState *sta) const override;
   int exceptPathCmp(const PathEnd *path_end,
                     const StaState *sta) const override;
+  // Replaces the data path and also invalidates the cached crpr value, because
+  // that value was computed for the previous data path.  This is the only place
+  // crpr_valid_ is cleared (search/PathEnd.cc:L521-L526), which is what keeps a
+  // reported crpr matched to the path it was computed for.
   void setPath(Path *path) override;
 
 protected:
@@ -279,11 +362,25 @@ protected:
   virtual Arrival targetClkArrivalNoCrpr(const StaState *sta) const;
   virtual Required requiredTimeNoCrpr(const StaState *sta) const;
 
+  // The target clock path.  It is the source of the target clock, its edge, the
+  // clock tree delay, and the vertex the check arc is derated against
+  // (search/PathEnd.cc:L967-L975).
   Path *clk_path_;
+  // Lazily filled crpr cache for the path_ and clk_path_ pair.  Both members
+  // are mutable so that the const accessor can fill them on first use
+  // (search/PathEnd.cc:L695-L704); setPath() declared above is the only thing
+  // that clears crpr_valid_.
   mutable Crpr crpr_;
   mutable bool crpr_valid_{false};
 };
 
+// Abstract; the protected constructor keeps it from being instantiated.
+// It adds exactly one thing to PathEndClkConstrained and nothing else: the
+// multicycle path and the target clock cycle adjustment derived from it.  Its
+// constructor stores mcp_ and does no other work
+// (search/PathEnd.cc:L753-L759).  Keeping the layer this thin is what lets a
+// type opt out of multicycle handling simply by deriving from
+// PathEndClkConstrained instead, which is what PathEndPathDelay does.
 class PathEndClkConstrainedMcp : public PathEndClkConstrained
 {
 public:
@@ -304,10 +401,21 @@ protected:
                     const MultiCyclePath *&hold_mcp,
                     const StaState *sta) const;
 
+  // The multicycle exception that shifts the target clock cycle.  It is null
+  // when no multicycle path applies, and consumers test for that through
+  // multiCyclePath() above (search/Sta.cc:L3487).
   MultiCyclePath *mcp_;
 };
 
 // Path constrained by timing check.
+// One class covers setup, hold, recovery and removal.  The kind of check is
+// not encoded in the type at all: checkRole() returns the role of the check
+// edge, so it is resolved at run time from the graph
+// (search/PathEnd.cc:L961-L965), and margin() derates the check arc for the
+// path's min/max sense and analysis point (search/PathEnd.cc:L967-L975).  That
+// is why all four report the same type name, "check"
+// (search/PathEnd.cc:L946), and why telling them apart means asking the role
+// rather than asking the type.
 class PathEndCheck : public PathEndClkConstrainedMcp
 {
 public:
@@ -322,6 +430,8 @@ public:
   const char *typeName() const override;
   void reportShort(const ReportPath *report) const override;
   void reportFull(const ReportPath *report) const override;
+  // Leaf-type predicate, not an is-a test: PathEndLatchCheck derives from this
+  // class yet overrides this to false and answers isLatchCheck() instead.
   bool isCheck() const override { return true; }
   ArcDelay margin(const StaState *sta) const override;
   float macroClkTreeDelay(const StaState *sta) const override;
@@ -335,11 +445,26 @@ protected:
   Delay sourceClkDelay(const StaState *sta) const;
   Required requiredTimeNoCrpr(const StaState *sta) const override;
 
+  // The check arc and its edge are the source of both numbers this type
+  // reports: margin() derates the arc (search/PathEnd.cc:L967-L975) and
+  // checkRole() returns the edge's role (search/PathEnd.cc:L961-L965).  They
+  // are what makes one class enough for four kinds of check.
   TimingArc *check_arc_;
   Edge *check_edge_;
 };
 
 // PathEndClkConstrained::clk_path_ is the latch enable.
+// The enable is not passed in.  The constructor hands null to PathEndCheck and
+// then assigns clk_path_ from the disable path through
+// Latches::latchEnableOtherPath (search/PathEnd.cc:L1080-L1099), so a latch
+// check is the one type whose target clock path is discovered rather than
+// given.  It is also the only type in the family that borrows time, and it
+// implements none of the borrowing arithmetic: required time, borrow, and the
+// borrow report are all answered by the latch service
+// (search/PathEnd.cc:L1185-L1246).  Its check role is setup() for a pulse clock
+// and latchSetup() otherwise, because latch setup cycle accounting is relative
+// to the enable opening edge rather than to the disable edge that the check is
+// made against (search/PathEnd.cc:L1155-L1165).
 class PathEndLatchCheck : public PathEndCheck
 {
 public:
@@ -353,6 +478,10 @@ public:
   Type type() const override;
   const char *typeName() const override;
   float sourceClkOffset(const StaState *sta) const override;
+  // A latch check derives from PathEndCheck yet answers false here and true to
+  // isLatchCheck() below.  That is the concrete demonstration that these
+  // predicates identify the leaf type, not the inheritance chain, so code that
+  // wants "any check" must test both rather than isCheck() alone.
   bool isCheck() const override { return false; }
   bool isLatchCheck() const override { return true; }
   PathDelay *pathDelay() const override { return path_delay_; }
@@ -363,6 +492,11 @@ public:
   void reportFull(const ReportPath *report) const override;
   const TimingRole *checkRole(const StaState *sta) const override;
   Required requiredTime(const StaState *sta) const override;
+  // The only override of PathEnd::borrow in the family; every other type keeps
+  // the base implementation, which returns zero (search/PathEnd.cc:L255-L259).
+  // The amount is not computed here: it is one of the values returned by
+  // Latches::latchRequired (search/Latches.hh:L52), which this forwards to
+  // (search/PathEnd.cc:L1198-L1209).
   Arrival borrow(const StaState *sta) const override;
   float targetClkTime(const StaState *sta) const override;
   float targetClkOffset(const StaState *sta) const override;
@@ -388,7 +522,14 @@ public:
   bool ignoreClkLatency(const StaState *sta) const override;
 
 protected:
+  // The latch disable path, which the implementation calls the setup check edge
+  // (search/PathEnd.cc:L1163).  targetClkWidth() measures the enable open pulse
+  // as the disable arrival minus the enable arrival, adding a clock period when
+  // the enable arrives after the disable (search/PathEnd.cc:L1248-L1267).
   Path *disable_path_;
+  // Set when a set_min_delay or set_max_delay exception also applies to this
+  // latch endpoint; it is handed to the latch service together with
+  // src_clk_arrival_ (search/PathEnd.cc:L1191-L1194).
   PathDelay *path_delay_;
   // Source clk arrival for set_max_delay -ignore_clk_latency.
   Arrival src_clk_arrival_;
@@ -397,6 +538,20 @@ protected:
 // Path constrained by an output delay.
 // If there is a reference pin, clk_path_ is the reference pin clock.
 // If there is a path delay PathEndPathDelay is used instead of this.
+// The margin is not a library number: it is the set_output_delay value for the
+// path transition and min/max sense, returned as is for max and negated for min
+// (search/PathEnd.cc:L1346-L1358).  The check role follows the same sense,
+// outputSetup() for max and outputHold() for min
+// (search/PathEnd.cc:L1360-L1367), and those two roles are generically setup and
+// hold, so requiredTimeNoCrpr subtracts the margin in the max case and adds it
+// in the min case (search/PathEnd.cc:L714-L723).  The negation is what cancels
+// that sign flip, leaving the output delay value subtracted from the target
+// clock arrival in both senses.
+// Observation: an implementation comment states there is no target clock path
+// for output delays (search/PathEnd.cc:L1304), yet the constructor it precedes
+// forwards clk_path to the base and targetClkArrivalNoCrpr() branches on
+// clk_path_ being non-null (search/PathEnd.cc:L1381), so that comment and the
+// reference pin line above disagree.
 class PathEndOutputDelay : public PathEndClkConstrainedMcp
 {
 public:
@@ -432,10 +587,20 @@ protected:
                    Arrival &insertion,
                    Arrival &latency) const;
 
+  // The set_output_delay constraint that supplies the margin.
   OutputDelay *output_delay_;
 };
 
 // Clock path constrained clock gating signal.
+// Alone in the family, this type is told its answers instead of deriving them:
+// the check role and the margin are both computed by the caller and passed to
+// the constructor, then returned verbatim by checkRole()
+// (search/PathEnd.cc:L1523-L1527) and by the inline margin() below.  It holds
+// no check arc and does not override checkArc(), so it keeps the null default
+// declared in PathEnd: a gated clock check constrains an enable against its
+// clock, and there is no library timing arc to derate.  Gated clock endpoints
+// are produced only while gated clock checking is enabled
+// (search/VisitPathEnds.cc:L125).
 class PathEndGatedClock : public PathEndClkConstrainedMcp
 {
 public:
@@ -457,10 +622,21 @@ public:
                     const StaState *sta) const override;
 
 protected:
+  // Both are supplied at construction and returned unchanged, which is what
+  // frees this type from needing a check arc or a min/max test to decide
+  // either one.
   const TimingRole *check_role_;
   ArcDelay margin_;
 };
 
+// Path constrained by a set_data_check, which checks one data pin against
+// another data pin rather than against a clock.  That is the distinction this
+// type encodes: the reference is a data path, so the roles are the data check
+// roles, dataCheckSetup() for max and dataCheckHold() for min
+// (search/PathEnd.cc:L1668-L1675).  The inherited clk_path_ is not supplied by
+// the caller; the constructor passes null to the base and then derives it from
+// the related data clock path (search/PathEnd.cc:L1563-L1573), and it can stay
+// null when that path comes from an input port (search/PathEnd.cc:L1628).
 class PathEndDataCheck : public PathEndClkConstrainedMcp
 {
 public:
@@ -489,13 +665,25 @@ protected:
   // setup uses zero cycle default
   int setupDefaultCycles() const override { return 0; }
 
+  // Path of the clock related to the checked data pin.  dataClkPath() exposes
+  // it and targetClkEdge() takes the target clock edge from it rather than
+  // from clk_path_ (search/PathEnd.cc:L1626-L1630).
   Path *data_clk_path_;
+  // The set_data_check constraint that supplies the margin.
   DataCheck *check_;
 };
 
 // Path constrained by set_min/max_delay.
 // "Clocked" when path delay ends at timing check pin.
 // May end at output with set_output_delay.
+// Note the parent: this is the only concrete type that derives from
+// PathEndClkConstrained directly instead of going through
+// PathEndClkConstrainedMcp, so it inherits no multicycle handling at all.  That
+// omission is deliberate rather than accidental, and the factory says
+// why in its own words: "False paths and path delays override multicycle
+// paths." (search/VisitPathEnds.cc:L262).  Its check role is the check edge's
+// role when the path delay ends at a timing check, and otherwise setup for max
+// and hold for min (search/PathEnd.cc:L1799-L1808).
 class PathEndPathDelay : public PathEndClkConstrained
 {
 public:
@@ -522,6 +710,9 @@ public:
   void reportFull(const ReportPath *report) const override;
   bool isPathDelay() const override { return true; }
   const TimingRole *checkRole(const StaState *sta) const override;
+  // True exactly when there is no check arc, that is when the path delay does
+  // not end at a timing check and the margin therefore comes from the
+  // exception rather than from a library check (search/PathEnd.cc:L1793-L1797).
   bool pathDelayMarginIsExternal() const override;
   PathDelay *pathDelay() const override { return path_delay_; }
   ArcDelay margin(const StaState *sta) const override;
@@ -540,7 +731,12 @@ protected:
   Arrival targetClkArrivalNoCrpr(const StaState *sta) const override;
   void findSrcClkArrival(const StaState *sta);
 
+  // The set_min_delay or set_max_delay exception that constrains this endpoint.
   PathDelay *path_delay_;
+  // Check arc and edge are both null unless the path delay ends at a timing
+  // check pin; only the check taking constructor sets them
+  // (search/PathEnd.cc:L1711-L1748).  Null is therefore meaningful here: it is
+  // what pathDelayMarginIsExternal() tests.
   TimingArc *check_arc_;
   Edge *check_edge_;
   // Output delay is nullptr when there is no output delay at the endpoint.
@@ -553,6 +749,16 @@ protected:
 
 // Compare slack or arrival for unconstrained path ends and pin names,
 // transitions along the source path.
+// This is the ordering reporting uses when equal slacks still have to be put in
+// a definite sequence.  operator() holds no logic of its own; it forwards to
+// PathEnd::cmp (search/PathEnd.cc:L2075), which compares slack, or negated
+// arrival when slack comparison is switched off or the first end is
+// unconstrained (search/PathEnd.cc:L1980-L1982), and only then breaks the tie in
+// four further steps: pin, transition and clock of the data path, the same for
+// the target clock path, then a full comparison of each
+// (search/PathEnd.cc:L1986, L1990, L1992, L1994).  Those four steps, and the
+// fact that it honors cmp_slack_ at all, are what distinguish it from
+// PathEndSlackLess.
 class PathEndLess
 {
 public:
@@ -562,11 +768,21 @@ public:
                   const PathEnd *path_end2) const;
 
 protected:
+  // Comparator configuration.  cmp_slack_ selects slack rather than arrival as
+  // the primary key and is read at search/PathEnd.cc:L2075.
   bool cmp_slack_;
   const StaState *sta_;
 };
 
 // Compare slack or arrival for unconstrained path ends.
+// Orders by slack, or by negated arrival when the first end is unconstrained,
+// because a later arrival is the worse path while a smaller slack is the worse
+// path (search/PathEnd.cc:L2091-L2093).  Unlike PathEndLess it applies no pin,
+// transition, clock or path tie break at all, so two ends of equal slack are
+// simply equivalent under it and their relative order is left undetermined.
+// Path grouping sorts a group's endpoints with it so the worst come first, and
+// then lets crpr tag de-duplication rather than a tie break decide which of
+// them are retained (search/PathGroup.cc:L738, L789).
 class PathEndSlackLess
 {
 public:
@@ -576,10 +792,21 @@ public:
                   const PathEnd *path_end2) const;
 
 protected:
+  // Comparator configuration.  Observation: cmp_slack_ is initialized
+  // (search/PathEnd.cc:L2082) but operator() never reads it
+  // (search/PathEnd.cc:L2088-L2094), so it does not affect this ordering.
   bool cmp_slack_;
   const StaState *sta_;
 };
 
+// Orders path ends by identity while ignoring crpr, so that two ends which
+// differ only in their crpr tag compare equal.  exceptPathCmp is consulted
+// first and its sign is the answer whenever it is nonzero; Path::cmpNoCrpr
+// breaks the remaining ties (search/PathEnd.cc:L2104-L2116).  Path grouping
+// uses it as the ordering of a std::set (search/PathGroup.cc:L611) so that only
+// the worst end per crpr tag is retained, and the code spells out what happens
+// to the rest: "Only save the worst path end for each crpr tag." / "PathEnum
+// will peel the others." (search/PathGroup.cc:L796-L797).
 class PathEndNoCrprLess
 {
 public:
@@ -588,6 +815,8 @@ public:
                   const PathEnd *path_end2) const;
 
 protected:
+  // Comparator configuration.  There is no cmp_slack_ here because crpr
+  // insensitive identity ordering never consults slack or arrival.
   const StaState *sta_;
 };
 
