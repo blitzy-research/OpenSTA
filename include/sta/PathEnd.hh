@@ -141,6 +141,12 @@ public:
 
   // Predicates for PathEnd type.
   // Default methods overridden by respective types.
+  // Each predicate names one concrete leaf type, so these are not is-a tests
+  // and they do not follow the inheritance chain.  isCheck() is the case that
+  // shows it: PathEndCheck overrides it to true, and PathEndLatchCheck, which
+  // derives from PathEndCheck, overrides it back to false and answers
+  // isLatchCheck() instead.  Code that means "any timing check" therefore has
+  // to test both, as path grouping does (search/PathGroup.cc:L446, L496).
   [[nodiscard]] virtual bool isUnconstrained() const { return false; }
   [[nodiscard]] virtual bool isCheck() const { return false; }
   [[nodiscard]] virtual bool isDataCheck() const { return false; }
@@ -463,8 +469,6 @@ public:
   const char *typeName() const override;
   void reportShort(const ReportPath *report) const override;
   void reportFull(const ReportPath *report) const override;
-  // Leaf-type predicate, not an is-a test: PathEndLatchCheck derives from this
-  // class yet overrides this to false and answers isLatchCheck() instead.
   bool isCheck() const override { return true; }
   ArcDelay margin(const StaState *sta) const override;
   float macroClkTreeDelay(const StaState *sta) const override;
@@ -515,10 +519,6 @@ public:
   Type type() const override;
   const char *typeName() const override;
   float sourceClkOffset(const StaState *sta) const override;
-  // A latch check derives from PathEndCheck yet answers false here and true to
-  // isLatchCheck() below.  That is the concrete demonstration that these
-  // predicates identify the leaf type, not the inheritance chain, so code that
-  // wants "any check" must test both rather than isCheck() alone.
   bool isCheck() const override { return false; }
   bool isLatchCheck() const override { return true; }
   PathDelay *pathDelay() const override { return path_delay_; }
